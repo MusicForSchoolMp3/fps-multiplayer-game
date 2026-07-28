@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FPS Multiplayer</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <canvas id="game-canvas"></canvas>
+
+  <!-- ─── Auth Screen ───────────────────────────────────────────────────────── -->
+  <div id="auth-screen">
+    <div id="auth-card">
+      <div id="auth-logo">
+        <span class="logo-fps">FPS</span>
+        <span class="logo-mp">MULTIPLAYER</span>
+      </div>
+      <div id="auth-tabs">
+        <button id="tab-login"    class="auth-tab active">LOGIN</button>
+        <button id="tab-register" class="auth-tab">REGISTER</button>
+      </div>
+
+      <!-- Login -->
+      <div id="login-panel" class="auth-panel">
+        <div class="auth-field">
+          <label class="auth-label">USERNAME</label>
+          <input id="login-username" type="text" class="auth-input" placeholder="Enter username" autocomplete="username" />
+        </div>
+        <div class="auth-field">
+          <label class="auth-label">PASSWORD</label>
+          <input id="login-password" type="password" class="auth-input" placeholder="Enter password" autocomplete="current-password" />
+        </div>
+        <div id="login-error" class="auth-error"></div>
+        <button id="login-btn" class="auth-submit">LOGIN</button>
+      </div>
+
+      <!-- Register -->
+      <div id="register-panel" class="auth-panel" style="display:none;">
+        <div class="auth-field">
+          <label class="auth-label">USERNAME <span class="auth-hint">3–20 characters</span></label>
+          <input id="reg-username" type="text" class="auth-input" placeholder="Choose a unique username" maxlength="20" autocomplete="username" />
+        </div>
+        <div class="auth-field">
+          <label class="auth-label">PASSWORD <span class="auth-hint">min. 6 characters</span></label>
+          <input id="reg-password" type="password" class="auth-input" placeholder="Create a password" autocomplete="new-password" />
+        </div>
+        <div class="auth-field">
+          <label class="auth-label">CONFIRM PASSWORD</label>
+          <input id="reg-confirm" type="password" class="auth-input" placeholder="Repeat password" autocomplete="new-password" />
+        </div>
+        <div id="reg-error" class="auth-error"></div>
+        <button id="register-btn" class="auth-submit">CREATE ACCOUNT</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Account Main Menu ─────────────────────────────────────────────────── -->
+  <div id="account-menu" style="display:none;">
+    <div id="menu-card">
+      <div class="menu-header">
+        <div id="menu-logo">
+          <span class="logo-fps">FPS</span>
+          <span class="logo-mp">MULTIPLAYER</span>
+        </div>
+        <div class="menu-tagline">TACTICAL ARENA</div>
+      </div>
+
+      <!-- Account Profile Box -->
+      <div id="account-profile-box">
+        <div class="profile-avatar-badge">👤</div>
+        <div class="profile-details">
+          <div class="profile-username" id="menu-username">Player</div>
+          <div class="profile-status"><span class="status-online-dot"></span> Online</div>
+        </div>
+      </div>
+
+      <!-- Account Stats Grid -->
+      <div id="account-stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">🎯</div>
+          <div class="stat-value" id="menu-total-kills">0</div>
+          <div class="stat-label">TOTAL KILLS</div>
+        </div>
+      </div>
+
+      <!-- Main Action Buttons -->
+      <div id="menu-actions">
+        <button id="menu-play-btn" class="menu-btn primary-btn">PLAY MATCH</button>
+        <button id="menu-settings-btn" class="menu-btn secondary-btn">⚙ SETTINGS</button>
+        <button id="menu-signout-btn" class="menu-btn danger-btn">🚪 SIGN OUT</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Pause & Settings Modal (press ESC or open from menu) ─────────────── -->
+  <div id="settings-modal" style="display:none;">
+    <div id="settings-card">
+      <div class="settings-header">
+        <h2>GAME SETTINGS</h2>
+        <span class="settings-close" id="settings-close-btn">&times;</span>
+      </div>
+      
+      <div class="settings-section">
+        <h3>CONTROLS & CAMERA</h3>
+        
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-title">First-Person Walk Animation</span>
+            <span class="setting-desc">Toggles camera head bobbing & side-to-side motion while walking</span>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="setting-head-bob" checked />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>WEAPONS</h3>
+        <div class="weapon-grid">
+          <button id="weapon-ar-btn" class="weapon-btn active">
+            <div class="weapon-icon">🔫</div>
+            <div class="weapon-name">AR</div>
+            <div class="weapon-stats">30/90 • 25 DMG</div>
+          </button>
+          <button id="weapon-sniper-btn" class="weapon-btn">
+            <div class="weapon-icon">🎯</div>
+            <div class="weapon-name">SNIPER</div>
+            <div class="weapon-stats">1/10 • 100 DMG</div>
+          </button>
+        </div>
+      </div>
+
+      <div class="settings-actions">
+        <button id="settings-resume-btn" class="menu-btn primary-btn">RESUME GAME</button>
+        <button id="settings-signout-btn" class="menu-btn danger-btn">SIGN OUT</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Crosshair ─────────────────────────────────────────────────────────── -->
+  <div id="crosshair">
+    <div class="ch-line ch-top"></div>
+    <div class="ch-line ch-bottom"></div>
+    <div class="ch-line ch-left"></div>
+    <div class="ch-line ch-right"></div>
+    <div class="ch-dot"></div>
+  </div>
+
+  <!-- ─── Sniper Zoom Vignette ─────────────────────────────────────────────────── -->
+  <div id="sniper-vignette"></div>
+
+  <!-- ─── HUD ─────────────────────────────────────────────────────────────── -->
+  <div id="hud">
+    <div id="health-container">
+      <div id="health-icon">♥</div>
+      <div id="health-bar-bg">
+        <div id="health-bar"></div>
+      </div>
+      <div id="health-text">100</div>
+    </div>
+    <div id="ammo-container">
+      <div id="weapon-name">AR</div>
+      <div id="ammo-current">30</div>
+      <div id="ammo-sep">/</div>
+      <div id="ammo-reserve">90</div>
+    </div>
+  </div>
+
+  <!-- ─── Third-person indicator ────────────────────────────────────────────── -->
+  <div id="view-indicator">1ST PERSON</div>
+
+  <!-- ─── Kill Feed ─────────────────────────────────────────────────────────── -->
+  <div id="kill-feed"></div>
+
+  <!-- ─── Hit Marker ────────────────────────────────────────────────────────── -->
+  <div id="hitmarker">
+    <div class="hm-line hm-tl"></div>
+    <div class="hm-line hm-tr"></div>
+    <div class="hm-line hm-bl"></div>
+    <div class="hm-line hm-br"></div>
+  </div>
+
+  <!-- ─── Reload indicator ──────────────────────────────────────────────────── -->
+  <div id="reload-indicator">RELOADING...</div>
+
+  <!-- ─── Death overlay ────────────────────────────────────────────────────── -->
+  <div id="death-overlay">
+    <div id="death-text">YOU DIED</div>
+    <div id="respawn-timer">Respawning in <span id="respawn-count">3</span>s</div>
+  </div>
+
+  <!-- ─── Lock screen ──────────────────────────────────────────────────────── -->
+  <div id="lock-screen">
+    <div id="lock-content">
+      <div id="lock-title">FPS MULTIPLAYER</div>
+      <div id="lock-subtitle">PROTOTYPE</div>
+      <div id="lock-prompt">Click to Play</div>
+      <button id="lock-menu-btn" class="menu-btn secondary-btn" style="margin-top: 20px;">📋 MENU</button>
+      <div id="lock-controls">
+        <div class="control-row"><kbd>W A S D</kbd><span>Move</span></div>
+        <div class="control-row"><kbd>SHIFT</kbd><span>Sprint</span></div>
+        <div class="control-row"><kbd>SPACE</kbd><span>Jump</span></div>
+        <div class="control-row"><kbd>LMB</kbd><span>Shoot</span></div>
+        <div class="control-row"><kbd>R</kbd><span>Reload</span></div>
+        <div class="control-row"><kbd>V</kbd><span>Toggle View</span></div>
+        <div class="control-row"><kbd>TAB</kbd><span>Scoreboard</span></div>
+        <div class="control-row"><kbd>ESC</kbd><span>Pause</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Scoreboard ───────────────────────────────────────────────────────── -->
+  <div id="scoreboard" style="display:none;">
+    <div id="scoreboard-title">PLAYERS</div>
+    <div id="scoreboard-list"></div>
+  </div>
+
+  <!-- ─── Status bar ───────────────────────────────────────────────────────── -->
+  <div id="status-bar">
+    <span id="status-dot"></span>
+    <span id="status-text">Connecting...</span>
+    <span id="ping-display"></span>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

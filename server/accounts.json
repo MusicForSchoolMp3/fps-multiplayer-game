@@ -1,0 +1,16 @@
+{
+  "9a6f94007696b06786c4": {
+    "id": "9a6f94007696b06786c4",
+    "username": "dom",
+    "passwordHash": "e283ec92caf2839b820276d3e1d9ea6c146d2411a82949d51dfb3e79066c31f0",
+    "createdAt": 1785231835051,
+    "totalKills": 3
+  },
+  "0cde68ca16c598b9c520": {
+    "id": "0cde68ca16c598b9c520",
+    "username": "dom1",
+    "passwordHash": "e283ec92caf2839b820276d3e1d9ea6c146d2411a82949d51dfb3e79066c31f0",
+    "totalKills": 7,
+    "createdAt": 1785242556436
+  }
+}
