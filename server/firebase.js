@@ -36,9 +36,24 @@ const serviceAccount = {
 try {
   console.log("Firebase Admin SDK version loaded.");
   console.log("Project ID:", process.env.FIREBASE_PROJECT_ID);
+  console.log("Private key exists:", !!process.env.FIREBASE_PRIVATE_KEY);
+
+  console.log("Private key length:", process.env.FIREBASE_PRIVATE_KEY.length);
   console.log(
-    "Private key exists:",
-    !!process.env.FIREBASE_PRIVATE_KEY
+    "Starts with:",
+    JSON.stringify(process.env.FIREBASE_PRIVATE_KEY.slice(0, 35))
+  );
+  console.log(
+    "Ends with:",
+    JSON.stringify(process.env.FIREBASE_PRIVATE_KEY.slice(-35))
+  );
+  console.log(
+    "Contains literal \\n:",
+    process.env.FIREBASE_PRIVATE_KEY.includes("\\n")
+  );
+  console.log(
+    "Contains real newline:",
+    process.env.FIREBASE_PRIVATE_KEY.includes("\n")
   );
 
   if (!getApps().length) {
@@ -54,7 +69,6 @@ try {
   console.error(error);
   process.exit(1);
 }
-
 const auth = getAuth();
 const db = getDatabase();
 
