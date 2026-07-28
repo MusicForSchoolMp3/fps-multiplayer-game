@@ -1,11 +1,14 @@
 // ─── server/firebase.js ──────────────────────────────────────────────────────────
 // Firebase Admin SDK configuration for server-side authentication and database
 
-import * as admin from 'firebase-admin';
+import admin from 'firebase-admin';
+import { getAuth } from 'firebase-admin/auth';
+import { getDatabase } from 'firebase-admin/database';
 
 // Check if required environment variables are set
 if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_PRIVATE_KEY || !process.env.FIREBASE_CLIENT_EMAIL) {
   console.error('Missing Firebase environment variables. Please check your Render environment settings.');
+  console.error('Required: FIREBASE_PROJECT_ID, FIREBASE_PRIVATE_KEY, FIREBASE_CLIENT_EMAIL');
   process.exit(1);
 }
 
@@ -34,10 +37,11 @@ try {
   }
 } catch (error) {
   console.error('Firebase Admin initialization error:', error.message);
+  console.error('Full error:', error);
   process.exit(1);
 }
 
-const auth = admin.auth();
-const db = admin.database();
+const auth = getAuth();
+const db = getDatabase();
 
 export { auth, db };
