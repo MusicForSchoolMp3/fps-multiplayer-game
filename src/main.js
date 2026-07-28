@@ -22,7 +22,7 @@ import {
 } from './firebase-config.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
-const SERVER_URL = window.location.origin;
+const SERVER_URL = "https://fps-multiplayer-game.onrender.com";
 const TICK_RATE   = 20;
 const EYE_HEIGHT  = 1.65;
 
