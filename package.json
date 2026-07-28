@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port 5173",
-    "build": "vite build",
+    "build": "npx vite build",
     "server": "node server/index.js",
     "start": "concurrently \"npm run server\" \"npm run dev\"",
     "start:prod": "node server/index.js"
