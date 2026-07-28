@@ -113,6 +113,19 @@ async function bootstrap() {
 }
 
 async function checkSession() {
+  // Bypass Firebase auth for local testing
+  if (SERVER_URL.includes('localhost')) {
+    const res = await fetch(`${SERVER_URL}/api/me`);
+    if (res.ok) {
+      const data = await res.json();
+      sessionToken = 'local-test-token';
+      sessionUsername = data.username;
+      sessionTotalKills = data.totalKills || 0;
+      return true;
+    }
+    return false;
+  }
+
   return new Promise((resolve) => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       unsubscribe();
@@ -205,13 +218,22 @@ function setupAuthUI() {
     loginBtn.disabled = true;
     loginBtn.textContent = 'LOGGING IN...';
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, user, pass);
-      const token = await userCredential.user.getIdToken();
-      const res = await fetch(`${SERVER_URL}/api/me?token=${token}`);
-      const data = await res.json();
-      saveSession(token, data.username, data.totalKills || 0);
-      hideAuth();
-      showAccountMenu();
+      if (SERVER_URL.includes('localhost')) {
+        // Bypass Firebase for local testing
+        const res = await fetch(`${SERVER_URL}/api/me`);
+        const data = await res.json();
+        saveSession('local-test-token', user, data.totalKills || 0);
+        hideAuth();
+        showAccountMenu();
+      } else {
+        const userCredential = await signInWithEmailAndPassword(auth, user, pass);
+        const token = await userCredential.user.getIdToken();
+        const res = await fetch(`${SERVER_URL}/api/me?token=${token}`);
+        const data = await res.json();
+        saveSession(token, data.username, data.totalKills || 0);
+        hideAuth();
+        showAccountMenu();
+      }
     } catch {
       loginError.textContent = 'Cannot reach server. Is it running?';
     } finally {
@@ -232,21 +254,35 @@ function setupAuthUI() {
     registerBtn.disabled = true;
     registerBtn.textContent = 'CREATING...';
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, user, pass);
-      const token = await userCredential.user.getIdToken();
-      
-      // Create player record in Firebase Realtime Database
-      await fetch(`${SERVER_URL}/api/create-player`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uid: userCredential.user.uid, username: user }),
-      });
-      
-      const res = await fetch(`${SERVER_URL}/api/me?token=${token}`);
-      const data = await res.json();
-      saveSession(token, data.username, data.totalKills || 0);
-      hideAuth();
-      showAccountMenu();
+      if (SERVER_URL.includes('localhost')) {
+        // Bypass Firebase for local testing
+        await fetch(`${SERVER_URL}/api/create-player`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uid: 'test-uid', username: user }),
+        });
+        const res = await fetch(`${SERVER_URL}/api/me`);
+        const data = await res.json();
+        saveSession('local-test-token', user, data.totalKills || 0);
+        hideAuth();
+        showAccountMenu();
+      } else {
+        const userCredential = await createUserWithEmailAndPassword(auth, user, pass);
+        const token = await userCredential.user.getIdToken();
+        
+        // Create player record in Firebase Realtime Database
+        await fetch(`${SERVER_URL}/api/create-player`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uid: userCredential.user.uid, username: user }),
+        });
+        
+        const res = await fetch(`${SERVER_URL}/api/me?token=${token}`);
+        const data = await res.json();
+        saveSession(token, data.username, data.totalKills || 0);
+        hideAuth();
+        showAccountMenu();
+      }
     } catch (error) {
       regError.textContent = error.message || 'Cannot reach server. Is it running?';
     } finally {
