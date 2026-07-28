@@ -1,7 +1,7 @@
 // ─── server/firebase.js ──────────────────────────────────────────────────────────
 // Firebase Admin SDK configuration for server-side authentication and database
 
-import admin from 'firebase-admin';
+import * as admin from 'firebase-admin';
 
 // Check if required environment variables are set
 if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_PRIVATE_KEY || !process.env.FIREBASE_CLIENT_EMAIL) {
