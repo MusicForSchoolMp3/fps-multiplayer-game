@@ -22,7 +22,7 @@ import {
 } from './firebase-config.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
-const SERVER_URL  = `${location.protocol}//${location.hostname}:3001`;
+const SERVER_URL = window.location.origin;
 const TICK_RATE   = 20;
 const EYE_HEIGHT  = 1.65;
 
