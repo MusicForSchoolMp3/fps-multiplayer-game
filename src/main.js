@@ -113,12 +113,12 @@ async function bootstrap() {
 }
 
 async function checkSession() {
-  // Bypass Firebase auth for local testing
-  if (SERVER_URL.includes('localhost')) {
+  // Bypass Firebase auth for test server (localhost or Render)
+  if (SERVER_URL.includes('localhost') || SERVER_URL.includes('onrender.com')) {
     const res = await fetch(`${SERVER_URL}/api/me`);
     if (res.ok) {
       const data = await res.json();
-      sessionToken = 'local-test-token';
+      sessionToken = 'test-token';
       sessionUsername = data.username;
       sessionTotalKills = data.totalKills || 0;
       return true;
@@ -218,11 +218,11 @@ function setupAuthUI() {
     loginBtn.disabled = true;
     loginBtn.textContent = 'LOGGING IN...';
     try {
-      if (SERVER_URL.includes('localhost')) {
-        // Bypass Firebase for local testing
+      if (SERVER_URL.includes('localhost') || SERVER_URL.includes('onrender.com')) {
+        // Bypass Firebase for test server
         const res = await fetch(`${SERVER_URL}/api/me`);
         const data = await res.json();
-        saveSession('local-test-token', user, data.totalKills || 0);
+        saveSession('test-token', user, data.totalKills || 0);
         hideAuth();
         showAccountMenu();
       } else {
@@ -254,8 +254,8 @@ function setupAuthUI() {
     registerBtn.disabled = true;
     registerBtn.textContent = 'CREATING...';
     try {
-      if (SERVER_URL.includes('localhost')) {
-        // Bypass Firebase for local testing
+      if (SERVER_URL.includes('localhost') || SERVER_URL.includes('onrender.com')) {
+        // Bypass Firebase for test server
         await fetch(`${SERVER_URL}/api/create-player`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -263,7 +263,7 @@ function setupAuthUI() {
         });
         const res = await fetch(`${SERVER_URL}/api/me`);
         const data = await res.json();
-        saveSession('local-test-token', user, data.totalKills || 0);
+        saveSession('test-token', user, data.totalKills || 0);
         hideAuth();
         showAccountMenu();
       } else {
