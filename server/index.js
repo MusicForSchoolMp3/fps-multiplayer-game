@@ -138,7 +138,7 @@ app.get('/api/me', (req, res) => {
     const account = accounts.get(username);
     res.json({ uid: account.uid, username, totalKills: account.totalKills || 0 });
   } else {
-    res.json({ uid: 'test-uid', username: 'TestPlayer', totalKills: 0 });
+    res.status(401).json({ error: 'Not authenticated' });
   }
 });
 
