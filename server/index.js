@@ -2,6 +2,12 @@
 import { createServer } from 'http';
 import express from 'express';
 import { Server } from 'socket.io';
+import { promises as fs } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const PORT = process.env.PORT || 3001;
 const TICK_MS = 1000 / 30;
@@ -25,6 +31,33 @@ let colorCounter = 0;
 let spawnIdx = 0;
 
 const players = new Map();
+const accounts = new Map(); // username -> { uid, totalKills }
+const ACCOUNTS_FILE = join(__dirname, 'accounts.json');
+
+// Load accounts from file
+async function loadAccounts() {
+  try {
+    const data = await fs.readFile(ACCOUNTS_FILE, 'utf8');
+    const parsed = JSON.parse(data);
+    for (const [username, account] of Object.entries(parsed)) {
+      accounts.set(username, account);
+    }
+    console.log(`Loaded ${accounts.size} accounts from file`);
+  } catch (err) {
+    console.log('No existing accounts file, starting fresh');
+  }
+}
+
+// Save accounts to file
+async function saveAccounts() {
+  const obj = {};
+  for (const [username, account] of accounts) {
+    obj[username] = account;
+  }
+  await fs.writeFile(ACCOUNTS_FILE, JSON.stringify(obj, null, 2));
+}
+
+loadAccounts();
 
 function nextSpawn() {
   const s = SPAWNS[spawnIdx % SPAWNS.length];
@@ -32,19 +65,20 @@ function nextSpawn() {
   return { ...s };
 }
 
-function createPlayer(socket) {
+function createPlayer(socket, username) {
   const spawn = nextSpawn();
+  const account = accounts.get(username) || { totalKills: 0 };
   return {
     id: socket.id,
-    accountId: socket.id,
-    username: `Player${socket.id.slice(0, 4)}`,
-    name: `Player${socket.id.slice(0, 4)}`,
+    accountId: username,
+    username: username,
+    name: username,
     colorIndex: (colorCounter++) % COLORS.length,
     x: spawn.x, y: spawn.y, z: spawn.z,
     yaw: 0, pitch: 0, speed: 0,
     isGrounded: true,
     health: MAX_HP,
-    kills: 0,
+    kills: account.totalKills || 0,
     deaths: 0,
     isDead: false,
     lastSeen: Date.now(),
@@ -85,17 +119,31 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use(express.static('dist'));
 
-// Mock API endpoints for testing
-app.post('/api/create-player', (req, res) => {
+// API endpoints for account management
+app.post('/api/create-player', async (req, res) => {
+  const { uid, username } = req.body || {};
+  if (!username) return res.status(400).json({ error: 'Missing username' });
+  
+  if (!accounts.has(username)) {
+    accounts.set(username, { uid: uid || username, totalKills: 0 });
+    await saveAccounts();
+  }
   res.json({ success: true });
 });
 
 app.get('/api/me', (req, res) => {
-  res.json({ uid: 'test-uid', username: 'TestPlayer', totalKills: 0 });
+  const username = req.query.username;
+  if (username && accounts.has(username)) {
+    const account = accounts.get(username);
+    res.json({ uid: account.uid, username, totalKills: account.totalKills || 0 });
+  } else {
+    res.json({ uid: 'test-uid', username: 'TestPlayer', totalKills: 0 });
+  }
 });
 
 io.on('connection', (socket) => {
-  const player = createPlayer(socket);
+  const username = socket.handshake.auth.username || `Player${socket.id.slice(0, 4)}`;
+  const player = createPlayer(socket, username);
   players.set(socket.id, player);
   console.log(`[+] ${player.username} connected (${socket.id})`);
 
@@ -163,7 +211,7 @@ io.on('connection', (socket) => {
   });
 });
 
-function killPlayer(victimId, killerId) {
+async function killPlayer(victimId, killerId) {
   const victim = players.get(victimId);
   const killer = players.get(killerId);
   if (!victim) return;
@@ -171,6 +219,12 @@ function killPlayer(victimId, killerId) {
   victim.health = 0;
   if (killer) {
     killer.kills++;
+    // Save kills to account
+    if (accounts.has(killer.username)) {
+      const account = accounts.get(killer.username);
+      account.totalKills = killer.kills;
+      await saveAccounts();
+    }
   }
   victim.deaths++;
   console.log(`[!] ${victim.username} killed by ${killer?.username || '?'}`);

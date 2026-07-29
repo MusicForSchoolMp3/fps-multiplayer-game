@@ -3,6 +3,7 @@
 // Features: real-time 3D FPS, third-person toggle (V), username labels.
 
 import * as THREE from 'three';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { PlayerController }        from './PlayerController.js';
 import { NetworkManager }          from './NetworkManager.js';
 import { WeaponSystem }            from './WeaponSystem.js';
@@ -13,12 +14,12 @@ import {
   createUsernameLabel,
 } from './AvatarManager.js';
 import './style.css';
-import { 
-  auth, 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
+import {
+  auth,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
   onAuthStateChanged,
-  firebaseSignOut 
+  firebaseSignOut
 } from './firebase-config.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -335,15 +336,15 @@ function startGame() {
   renderer.setClearColor(0x87CEEB); // Sky blue
 
   scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x87CEEB, 40, 150);
+  // No fog
 
   camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 200);
   scene.add(camera);
   clock  = new THREE.Clock();
 
   // ── Lighting ──────────────────────────────────────────────────────────────
-  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-  const sun = new THREE.DirectionalLight(0xffffcc, 1.2);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.9)); // Brighter ambient
+  const sun = new THREE.DirectionalLight(0xffffcc, 1.5); // Brighter sun
   sun.position.set(50, 80, 30);
   scene.add(sun);
 
@@ -358,9 +359,47 @@ function startGame() {
   fill.position.set(-8, 5, -10);
   scene.add(fill);
 
-  // ── Simple Map ──────────────────────────────────────────────────────────────
+  // ── Clouds ────────────────────────────────────────────────────────────────
+  const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+  const cloudPositions = [
+    { x: -30, y: 40, z: -50 }, { x: 20, y: 45, z: -40 },
+    { x: -50, y: 38, z: 20 }, { x: 40, y: 42, z: 30 },
+    { x: 0, y: 50, z: -60 }, { x: -20, y: 35, z: 50 },
+    { x: 60, y: 45, z: -20 }, { x: -60, y: 40, z: 40 },
+  ];
+
+  const createCloud = (x, y, z) => {
+    const cloudGroup = new THREE.Group();
+    const cloudParts = 5;
+
+    for (let i = 0; i < cloudParts; i++) {
+      const size = 3 + Math.random() * 4;
+      const cloudPart = new THREE.Mesh(
+        new THREE.SphereGeometry(size, 8, 8),
+        cloudMat
+      );
+      cloudPart.position.set(
+        (Math.random() - 0.5) * 8,
+        (Math.random() - 0.5) * 2,
+        (Math.random() - 0.5) * 4
+      );
+      cloudGroup.add(cloudPart);
+    }
+
+    cloudGroup.position.set(x, y, z);
+    cloudGroup.userData.isCloud = true;
+    cloudGroup.userData.baseX = x;
+    cloudGroup.userData.speed = 0.5 + Math.random() * 0.5;
+    scene.add(cloudGroup);
+    return cloudGroup;
+  };
+
+  const clouds = cloudPositions.map(pos => createCloud(pos.x, pos.y, pos.z));
+  window.clouds = clouds;
+
+// ── Simple Map ──────────────────────────────────────────────────────────────
   const wallMat = new THREE.MeshLambertMaterial({ color: 0x3a4055 });
-  const floorMat = new THREE.MeshLambertMaterial({ color: 0x4a5a4a });
+  const floorMat = new THREE.MeshLambertMaterial({ color: 0x5a8a4a }); // Brighter green grass
   const accentMat = new THREE.MeshLambertMaterial({ color: 0x4a5568 });
   const buildingMat = new THREE.MeshLambertMaterial({ color: 0x5a5a6a });
   const treeMat = new THREE.MeshLambertMaterial({ color: 0x2d5a2d });
@@ -478,17 +517,31 @@ function startGame() {
   ];
 
   rampPositions.forEach(ramp => {
-    const rampMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(8, 0.5, 12),
-      accentMat
-    );
-    rampMesh.position.set(ramp.x, 1.5, ramp.z);
-    rampMesh.rotation.y = ramp.rotY;
-    rampMesh.rotation.x = Math.PI / 6; // Tilt for ramp
-    scene.add(rampMesh);
+    // Create staircase-style ramp for better collision
+    const steps = 8;
+    const stepHeight = 0.3;
+    const stepDepth = 12 / steps;
+    const rampWidth = 8;
+
+    for (let i = 0; i < steps; i++) {
+      const stepMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(rampWidth, stepHeight, stepDepth),
+        accentMat
+      );
+
+      // Calculate position along the ramp
+      const progress = i / steps;
+      const xOffset = Math.sin(ramp.rotY) * (progress * 12 - 6);
+      const zOffset = Math.cos(ramp.rotY) * (progress * 12 - 6);
+      const yOffset = 1.0 + (i * stepHeight);
+
+      stepMesh.position.set(ramp.x + xOffset, yOffset, ramp.z + zOffset);
+      stepMesh.rotation.y = ramp.rotY;
+      scene.add(stepMesh);
+    }
   });
 
-  // Ammo pickups
+  // Ammo pickups - load FBX model
   const ammoPickups = [];
   const ammoPositions = [
     { x: -15, z: -15 }, { x: 15, z: -15 }, { x: -15, z: 15 }, { x: 15, z: 15 },
@@ -496,41 +549,48 @@ function startGame() {
     { x: -25, z: -25 }, { x: 25, z: -25 }, { x: -25, z: 25 }, { x: 25, z: 25 },
   ];
 
-  const ammoMat = new THREE.MeshLambertMaterial({ color: 0xffaa00, emissive: 0xff4400, emissiveIntensity: 0.3 });
+  const fbxLoader = new FBXLoader();
+  let ammoModel = null;
 
-  ammoPositions.forEach(pos => {
-    const ammoBox = new THREE.Mesh(
-      new THREE.BoxGeometry(0.6, 0.6, 0.6),
-      ammoMat
-    );
-    ammoBox.position.set(pos.x, 1.5, pos.z);
-    ammoBox.userData.isAmmo = true;
-    ammoBox.userData.ammoAmount = 30;
-    scene.add(ammoBox);
-    ammoPickups.push(ammoBox);
+  fbxLoader.load('/Ammo crate.fbx', (fbx) => {
+    ammoModel = fbx;
+    ammoModel.scale.set(0.05, 0.05, 0.05); // Increased scale
+
+    ammoPositions.forEach((pos, index) => {
+      const ammoInstance = ammoModel.clone();
+      ammoInstance.position.set(pos.x, 1.5, pos.z);
+      ammoInstance.userData.isAmmo = true;
+      ammoInstance.userData.ammoAmount = 30;
+      ammoInstance.userData.baseY = 1.5;
+      ammoInstance.userData.phaseOffset = index * 0.5; // Different phase for each pickup
+      scene.add(ammoInstance);
+      ammoPickups.push(ammoInstance);
+    });
+
+    // Store ammo pickups globally for collision detection
+    window.ammoPickups = ammoPickups;
+  }, undefined, (error) => {
+    console.error('Error loading FBX model:', error);
+    // Fallback to procedural boxes if FBX fails
+    const ammoMat = new THREE.MeshLambertMaterial({ color: 0xffaa00, emissive: 0xff4400, emissiveIntensity: 0.3 });
+    ammoPositions.forEach((pos, index) => {
+      const ammoBox = new THREE.Mesh(
+        new THREE.BoxGeometry(1.0, 1.0, 1.0), // Bigger fallback boxes
+        ammoMat
+      );
+      ammoBox.position.set(pos.x, 1.5, pos.z);
+      ammoBox.userData.isAmmo = true;
+      ammoBox.userData.ammoAmount = 30;
+      ammoBox.userData.baseY = 1.5;
+      ammoBox.userData.phaseOffset = index * 0.5;
+      scene.add(ammoBox);
+      ammoPickups.push(ammoBox);
+    });
+    window.ammoPickups = ammoPickups;
   });
 
-  // Store ammo pickups globally for collision detection
-  window.ammoPickups = ammoPickups;
-
-  // Trees
-  const createTree = (x, z) => {
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.3, 0.4, 3, 8),
-      trunkMat
-    );
-    trunk.position.set(x, 1.5, z);
-    scene.add(trunk);
-
-    const foliage = new THREE.Mesh(
-      new THREE.ConeGeometry(2, 4, 8),
-      treeMat
-    );
-    foliage.position.set(x, 4.5, z);
-    scene.add(foliage);
-  };
-
-  // Add trees scattered around
+  // Trees - load FBX low poly model
+  const treeLoader = new FBXLoader();
   const treePositions = [
     { x: -20, z: -20 }, { x: 20, z: -20 }, { x: -20, z: 20 }, { x: 20, z: 20 },
     { x: -60, z: -20 }, { x: 60, z: -20 }, { x: -60, z: 20 }, { x: 60, z: 20 },
@@ -539,7 +599,35 @@ function startGame() {
     { x: -55, z: -55 }, { x: 55, z: -55 }, { x: -55, z: 55 }, { x: 55, z: 55 },
   ];
 
-  treePositions.forEach(pos => createTree(pos.x, pos.z));
+  treeLoader.load('/Lowpoly_tree_sample.fbx', (fbx) => {
+    const treeModel = fbx;
+    treeModel.scale.set(0.03, 0.03, 0.03);
+
+    treePositions.forEach(pos => {
+      const treeInstance = treeModel.clone();
+      treeInstance.position.set(pos.x, 0, pos.z);
+      scene.add(treeInstance);
+    });
+  }, undefined, (error) => {
+    console.error('Error loading tree FBX model:', error);
+    // Fallback to procedural trees
+    const createTree = (x, z) => {
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.3, 0.4, 3, 8),
+        trunkMat
+      );
+      trunk.position.set(x, 1.5, z);
+      scene.add(trunk);
+
+      const foliage = new THREE.Mesh(
+        new THREE.ConeGeometry(2, 4, 8),
+        treeMat
+      );
+      foliage.position.set(x, 4.5, z);
+      scene.add(foliage);
+    };
+    treePositions.forEach(pos => createTree(pos.x, pos.z));
+  });
 
   // Central cover structure
   const coverHeight = 3;
@@ -635,6 +723,7 @@ function startGame() {
     m.updateMatrixWorld(true);
     return new THREE.Box3().setFromObject(m);
   });
+
 
   // ── Controller ────────────────────────────────────────────────────────────
   controller = new PlayerController(camera, canvas);
@@ -1072,10 +1161,20 @@ function gameLoop() {
   // ── Ammo pickup collision ────────────────────────────────────────────────
   if (!isDead && window.ammoPickups) {
     const playerPos = controller.position;
+    const time = now / 1000;
+
     for (let i = window.ammoPickups.length - 1; i >= 0; i--) {
       const pickup = window.ammoPickups[i];
       if (!pickup.visible) continue;
 
+      // Spin animation
+      pickup.rotation.y += delta * 2;
+
+      // Bob up and down animation
+      const phase = pickup.userData.phaseOffset || 0;
+      pickup.position.y = pickup.userData.baseY + Math.sin(time * 2 + phase) * 0.2;
+
+      // Collision detection
       const dist = playerPos.distanceTo(pickup.position);
       if (dist < 2.0) {
         // Pickup ammo
@@ -1084,6 +1183,17 @@ function gameLoop() {
         }
         scene.remove(pickup);
         window.ammoPickups.splice(i, 1);
+      }
+    }
+  }
+
+  // ── Cloud animation ─────────────────────────────────────────────────────────
+  if (window.clouds) {
+    for (const cloud of window.clouds) {
+      cloud.position.x += cloud.userData.speed * delta;
+      // Reset cloud position when it goes too far
+      if (cloud.position.x > 100) {
+        cloud.position.x = -100;
       }
     }
   }

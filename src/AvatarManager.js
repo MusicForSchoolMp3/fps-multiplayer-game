@@ -37,7 +37,7 @@ export function buildHumanoid(colorIndex = 0, isLocal = false) {
   
   // Offset root so feet are at ground level when positioned at y=0
   // Foot bottom is at y=-0.70 relative to root, so raise root by 0.70
-  root.position.y = 0.70;
+  root.position.y = 0;
 
   const accentMat = new THREE.MeshLambertMaterial({
     color: PLAYER_COLORS[colorIndex % PLAYER_COLORS.length],

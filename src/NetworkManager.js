@@ -6,8 +6,8 @@ import { io } from 'socket.io-client';
 const INTERP_DELAY = 100; // ms of interpolation buffer
 
 export class NetworkManager {
-  constructor(serverUrl, token) {
-    this.socket    = io(serverUrl, { transports: ['websocket'], auth: { token } });
+  constructor(serverUrl, token, username) {
+    this.socket    = io(serverUrl, { transports: ['websocket'], auth: { token, username } });
     this.localId   = null;
     this.connected = false;
     this.ping      = 0;
