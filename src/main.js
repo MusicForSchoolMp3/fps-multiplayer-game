@@ -106,10 +106,19 @@ const MOVE_INTERVAL   = 1000 / TICK_RATE;
 async function bootstrap() {
   setupAuthUI();
   setupMenuButtons();
-  const ok = await checkSession();
-  if (ok) {
-    hideAuth();
-    showAccountMenu();
+  // Try to load saved session first
+  if (loadSession()) {
+    const ok = await checkSession();
+    if (ok) {
+      hideAuth();
+      showAccountMenu();
+    }
+  } else {
+    const ok = await checkSession();
+    if (ok) {
+      hideAuth();
+      showAccountMenu();
+    }
   }
 }
 
@@ -159,6 +168,8 @@ function saveSession(token, username, totalKills = 0) {
   sessionToken = token;
   sessionUsername = username;
   sessionTotalKills = totalKills;
+  // Persist to localStorage
+  localStorage.setItem('fps_session', JSON.stringify({ token, username, totalKills }));
 }
 
 function hideAuth() {
@@ -178,11 +189,28 @@ async function signOut() {
   sessionToken = null;
   sessionUsername = null;
   sessionTotalKills = 0;
+  localStorage.removeItem('fps_session');
   accountMenu.style.display = 'none';
   settingsModal.style.display = 'none';
   lockScreen.style.display = 'none';
   authScreen.style.display = 'flex';
   if (net && net.socket) net.socket.disconnect();
+}
+
+function loadSession() {
+  const saved = localStorage.getItem('fps_session');
+  if (saved) {
+    try {
+      const { token, username, totalKills } = JSON.parse(saved);
+      sessionToken = token;
+      sessionUsername = username;
+      sessionTotalKills = totalKills;
+      return true;
+    } catch (e) {
+      localStorage.removeItem('fps_session');
+    }
+  }
+  return false;
 }
 
 function setupAuthUI() {
@@ -433,28 +461,20 @@ function startGame() {
     return building;
   };
 
-  // Main buildings
+  // Main buildings - reduced for performance
   createBuilding(-30, -30, 12, 8, 12);
-  createBuilding(30, -30, 12, 8, 12);
-  createBuilding(-30, 30, 12, 8, 12);
   createBuilding(30, 30, 12, 8, 12);
 
-  // Smaller buildings
+  // Smaller buildings - reduced for performance
   createBuilding(-50, 0, 8, 5, 8);
   createBuilding(50, 0, 8, 5, 8);
-  createBuilding(0, -50, 8, 5, 8);
-  createBuilding(0, 50, 8, 5, 8);
 
-  // Additional ramps around the map
+  // Reduced ramps
   const rampPositions = [
     { x: -20, z: 0, rotY: 0 },
     { x: 20, z: 0, rotY: Math.PI },
     { x: 0, z: -20, rotY: Math.PI / 2 },
     { x: 0, z: 20, rotY: -Math.PI / 2 },
-    { x: -35, z: -15, rotY: Math.PI / 4 },
-    { x: 35, z: -15, rotY: -Math.PI / 4 },
-    { x: -35, z: 15, rotY: -Math.PI / 4 },
-    { x: 35, z: 15, rotY: Math.PI / 4 },
   ];
 
   rampPositions.forEach(ramp => {
@@ -468,38 +488,30 @@ function startGame() {
     scene.add(rampMesh);
   });
 
-  // Elevated walkways
-  const walkwayPositions = [
-    { x: 0, z: -25, length: 30, rotY: 0 },
-    { x: 0, z: 25, length: 30, rotY: 0 },
-    { x: -25, z: 0, length: 30, rotY: Math.PI / 2 },
-    { x: 25, z: 0, length: 30, rotY: Math.PI / 2 },
+  // Ammo pickups
+  const ammoPickups = [];
+  const ammoPositions = [
+    { x: -15, z: -15 }, { x: 15, z: -15 }, { x: -15, z: 15 }, { x: 15, z: 15 },
+    { x: -35, z: 0 }, { x: 35, z: 0 }, { x: 0, z: -35 }, { x: 0, z: 35 },
+    { x: -25, z: -25 }, { x: 25, z: -25 }, { x: -25, z: 25 }, { x: 25, z: 25 },
   ];
 
-  walkwayPositions.forEach(ww => {
-    const walkway = new THREE.Mesh(
-      new THREE.BoxGeometry(ww.length, 0.5, 4),
-      accentMat
-    );
-    walkway.position.set(ww.x, 4, ww.z);
-    walkway.rotation.y = ww.rotY;
-    scene.add(walkway);
+  const ammoMat = new THREE.MeshLambertMaterial({ color: 0xffaa00, emissive: 0xff4400, emissiveIntensity: 0.3 });
 
-    // Support pillars
-    for (let i = 0; i < 3; i++) {
-      const pillar = new THREE.Mesh(
-        new THREE.BoxGeometry(1, 4, 1),
-        wallMat
-      );
-      const offset = (i - 1) * (ww.length / 3);
-      if (ww.rotY === 0) {
-        pillar.position.set(ww.x + offset, 2, ww.z);
-      } else {
-        pillar.position.set(ww.x, 2, ww.z + offset);
-      }
-      scene.add(pillar);
-    }
+  ammoPositions.forEach(pos => {
+    const ammoBox = new THREE.Mesh(
+      new THREE.BoxGeometry(0.6, 0.6, 0.6),
+      ammoMat
+    );
+    ammoBox.position.set(pos.x, 1.5, pos.z);
+    ammoBox.userData.isAmmo = true;
+    ammoBox.userData.ammoAmount = 30;
+    scene.add(ammoBox);
+    ammoPickups.push(ammoBox);
   });
+
+  // Store ammo pickups globally for collision detection
+  window.ammoPickups = ammoPickups;
 
   // Trees
   const createTree = (x, z) => {
@@ -838,8 +850,15 @@ function ensureLocalBody() {
   label.position.set(0, 2.1, 0);
   root.add(label);
 
+  // Invisible hitbox
+  const hitboxGeo = new THREE.BoxGeometry(1, 2, 1);
+  const hitboxMat = new THREE.MeshBasicMaterial({ visible: false });
+  const hitbox = new THREE.Mesh(hitboxGeo, hitboxMat);
+  hitbox.position.set(0, 1, 0);
+  root.add(hitbox);
+
   scene.add(root);
-  localBodyAvatar = { root, joints };
+  localBodyAvatar = { root, joints, hitbox };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -951,9 +970,16 @@ function spawnRemotePlayer(id, data) {
   label.position.set(0, 2.1, 0);
   root.add(label);
 
+  // Invisible hitbox
+  const hitboxGeo = new THREE.BoxGeometry(1, 2, 1);
+  const hitboxMat = new THREE.MeshBasicMaterial({ visible: false });
+  const hitbox = new THREE.Mesh(hitboxGeo, hitboxMat);
+  hitbox.position.set(0, 1, 0);
+  root.add(hitbox);
+
   scene.add(root);
   const animState = { time: 0, speed: 0, isGrounded: true, pitch: 0 };
-  remotePlayers.set(id, { root, joints, animState, label });
+  remotePlayers.set(id, { root, joints, animState, label, hitbox });
 
   scores.set(id, { kills: data.kills || 0, deaths: data.deaths || 0, name: uname });
   updateScoreboard();
@@ -1036,6 +1062,31 @@ function gameLoop() {
   requestAnimationFrame(gameLoop);
   const delta = Math.min(clock.getDelta(), 0.1);
   const now   = performance.now();
+
+  // ── Health regeneration ────────────────────────────────────────────────────
+  if (!isDead && localHealth < 100) {
+    localHealth = Math.min(100, localHealth + delta * 5); // 5 health per second
+    updateHealthUI();
+  }
+
+  // ── Ammo pickup collision ────────────────────────────────────────────────
+  if (!isDead && window.ammoPickups) {
+    const playerPos = controller.position;
+    for (let i = window.ammoPickups.length - 1; i >= 0; i--) {
+      const pickup = window.ammoPickups[i];
+      if (!pickup.visible) continue;
+
+      const dist = playerPos.distanceTo(pickup.position);
+      if (dist < 2.0) {
+        // Pickup ammo
+        if (weapon && weapon.addAmmo) {
+          weapon.addAmmo(pickup.userData.ammoAmount);
+        }
+        scene.remove(pickup);
+        window.ammoPickups.splice(i, 1);
+      }
+    }
+  }
 
   // ── Local controller ──────────────────────────────────────────────────────
   if (!isDead) controller.update(delta);

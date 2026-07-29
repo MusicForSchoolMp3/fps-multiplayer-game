@@ -188,7 +188,8 @@ export class PlayerController {
 
       if (horizontalOverlap) {
         // Platform top support (stepping on platform)
-        if (box.max.y <= feetY + 0.4 && box.max.y >= supportY) {
+        // Increased tolerance for ramps and platforms
+        if (box.max.y <= feetY + 0.6 && box.max.y >= supportY) {
           supportY = box.max.y;
         }
       }

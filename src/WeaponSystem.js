@@ -82,6 +82,11 @@ export class WeaponSystem {
     this._updateUI();
   }
 
+  addAmmo(amount) {
+    this.reserve = Math.min(this.reserve + amount, WEAPONS[this.currentWeapon].reserveMax);
+    this._updateUI();
+  }
+
   setMapMeshes(meshes) {
     this.mapMeshes = meshes || [];
   }

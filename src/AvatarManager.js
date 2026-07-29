@@ -258,9 +258,9 @@ export function animateAvatar(joints, animState, delta) {
   joints.upperLegR.rotation.x = walk * walkAmp;
   joints.upperLegL.rotation.x = -walk * walkAmp;
 
-  // Knee bend (lower legs)
-  joints.lowerLegR.rotation.x = Math.abs(walk) * walkAmp * 0.5;
-  joints.lowerLegL.rotation.x = Math.abs(-walk) * walkAmp * 0.5;
+  // Knee bend (lower legs) - clamp to prevent ground clipping
+  joints.lowerLegR.rotation.x = Math.min(Math.abs(walk) * walkAmp * 0.5, 0.8);
+  joints.lowerLegL.rotation.x = Math.min(Math.abs(-walk) * walkAmp * 0.5, 0.8);
 
   // Arm swing (opposite to legs)
   joints.upperArmR.rotation.x = THREE.MathUtils.lerp(
