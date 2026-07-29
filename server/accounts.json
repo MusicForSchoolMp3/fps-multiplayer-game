@@ -12,5 +12,10 @@
     "passwordHash": "e283ec92caf2839b820276d3e1d9ea6c146d2411a82949d51dfb3e79066c31f0",
     "totalKills": 7,
     "createdAt": 1785242556436
+  },
+  "ben": {
+    "uid": "ben",
+    "password": "Bennysigmaboy123",
+    "totalKills": 0
   }
 }

@@ -117,19 +117,32 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
-app.use(express.static('dist'));
-app.use(express.static('.')); // Serve root directory for FBX files
 
-// API endpoints for account management
-app.post('/api/create-player', async (req, res) => {
-  const { uid, username } = req.body || {};
-  if (!username) return res.status(400).json({ error: 'Missing username' });
-  
-  if (!accounts.has(username)) {
-    accounts.set(username, { uid: uid || username, totalKills: 0 });
-    await saveAccounts();
+// API endpoints for account management (must be before static files)
+app.post('/api/register', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'Missing username or password' });
+
+  if (accounts.has(username)) {
+    return res.status(400).json({ error: 'Username already exists' });
   }
+
+  // Simple password storage (in production, use bcrypt)
+  accounts.set(username, { uid: username, password, totalKills: 0 });
+  await saveAccounts();
   res.json({ success: true });
+});
+
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'Missing username or password' });
+
+  const account = accounts.get(username);
+  if (!account || account.password !== password) {
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+
+  res.json({ uid: account.uid, username, totalKills: account.totalKills || 0 });
 });
 
 app.get('/api/me', (req, res) => {
@@ -141,6 +154,21 @@ app.get('/api/me', (req, res) => {
     res.status(401).json({ error: 'Not authenticated' });
   }
 });
+
+app.post('/api/create-player', async (req, res) => {
+  const { uid, username } = req.body || {};
+  if (!username) return res.status(400).json({ error: 'Missing username' });
+
+  if (!accounts.has(username)) {
+    accounts.set(username, { uid: uid || username, totalKills: 0 });
+    await saveAccounts();
+  }
+  res.json({ success: true });
+});
+
+// Static file serving (must be after API routes)
+app.use(express.static('dist'));
+app.use(express.static('.')); // Serve root directory for FBX files
 
 io.on('connection', (socket) => {
   const username = socket.handshake.auth.username || `Player${socket.id.slice(0, 4)}`;

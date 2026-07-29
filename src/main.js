@@ -252,14 +252,16 @@ function setupAuthUI() {
     loginBtn.textContent = 'LOGGING IN...';
     try {
       if (SERVER_URL.includes('localhost') || SERVER_URL.includes('onrender.com')) {
-        // Bypass Firebase for test server
-        await fetch(`${SERVER_URL}/api/create-player`, {
+        // Use test server login endpoint
+        const res = await fetch(`${SERVER_URL}/api/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ uid: user, username: user }),
+          body: JSON.stringify({ username: user, password: pass }),
         });
-        const res = await fetch(`${SERVER_URL}/api/me?username=${user}`);
         const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Login failed');
+        }
         saveSession('test-token', user, data.totalKills || 0);
         hideAuth();
         showAccountMenu();
@@ -272,8 +274,8 @@ function setupAuthUI() {
         hideAuth();
         showAccountMenu();
       }
-    } catch {
-      loginError.textContent = 'Cannot reach server. Is it running?';
+    } catch (error) {
+      loginError.textContent = error.message || 'Cannot reach server. Is it running?';
     } finally {
       loginBtn.disabled = false;
       loginBtn.textContent = 'LOGIN';
@@ -293,15 +295,17 @@ function setupAuthUI() {
     registerBtn.textContent = 'CREATING...';
     try {
       if (SERVER_URL.includes('localhost') || SERVER_URL.includes('onrender.com')) {
-        // Bypass Firebase for test server
-        await fetch(`${SERVER_URL}/api/create-player`, {
+        // Use test server register endpoint
+        const res = await fetch(`${SERVER_URL}/api/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ uid: user, username: user }),
+          body: JSON.stringify({ username: user, password: pass }),
         });
-        const res = await fetch(`${SERVER_URL}/api/me?username=${user}`);
         const data = await res.json();
-        saveSession('test-token', user, data.totalKills || 0);
+        if (!res.ok) {
+          throw new Error(data.error || 'Registration failed');
+        }
+        saveSession('test-token', user, 0);
         hideAuth();
         showAccountMenu();
       } else {
