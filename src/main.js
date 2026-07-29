@@ -124,8 +124,8 @@ async function bootstrap() {
 }
 
 async function checkSession() {
-  // Bypass Firebase auth for test server (localhost or Render)
-  if (SERVER_URL.includes('localhost') || SERVER_URL.includes('onrender.com')) {
+  // Bypass Firebase auth for localhost testing only
+  if (SERVER_URL.includes('localhost')) {
     const res = await fetch(`${SERVER_URL}/api/me?username=${sessionUsername || 'TestPlayer'}`);
     if (res.ok) {
       const data = await res.json();
@@ -248,8 +248,8 @@ function setupAuthUI() {
     loginBtn.disabled = true;
     loginBtn.textContent = 'LOGGING IN...';
     try {
-      if (SERVER_URL.includes('localhost') || SERVER_URL.includes('onrender.com')) {
-        // Bypass Firebase for test server
+      if (SERVER_URL.includes('localhost')) {
+        // Bypass Firebase for localhost testing
         const res = await fetch(`${SERVER_URL}/api/me`);
         const data = await res.json();
         saveSession('test-token', user, data.totalKills || 0);
@@ -284,8 +284,8 @@ function setupAuthUI() {
     registerBtn.disabled = true;
     registerBtn.textContent = 'CREATING...';
     try {
-      if (SERVER_URL.includes('localhost') || SERVER_URL.includes('onrender.com')) {
-        // Bypass Firebase for test server
+      if (SERVER_URL.includes('localhost')) {
+        // Bypass Firebase for localhost testing
         await fetch(`${SERVER_URL}/api/create-player`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
