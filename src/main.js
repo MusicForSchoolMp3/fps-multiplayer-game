@@ -36,6 +36,7 @@ const healthBar       = document.getElementById('health-bar');
 const healthText      = document.getElementById('health-text');
 const killFeed        = document.getElementById('kill-feed');
 const hitmarkerEl     = document.getElementById('hitmarker');
+const damageVignette  = document.getElementById('damage-vignette');
 const statusDot       = document.getElementById('status-dot');
 const statusText      = document.getElementById('status-text');
 const pingDisplay     = document.getElementById('ping-display');
@@ -115,7 +116,7 @@ async function bootstrap() {
 async function checkSession() {
   // Bypass Firebase auth for test server (localhost or Render)
   if (SERVER_URL.includes('localhost') || SERVER_URL.includes('onrender.com')) {
-    const res = await fetch(`${SERVER_URL}/api/me`);
+    const res = await fetch(`${SERVER_URL}/api/me?username=${sessionUsername || 'TestPlayer'}`);
     if (res.ok) {
       const data = await res.json();
       sessionToken = 'test-token';
@@ -303,20 +304,28 @@ function startGame() {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setClearColor(0x1a1e26);
+  renderer.setClearColor(0x87CEEB); // Sky blue
 
   scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x1a1e26, 40, 120);
+  scene.fog = new THREE.Fog(0x87CEEB, 40, 150);
 
   camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 200);
   scene.add(camera);
   clock  = new THREE.Clock();
 
   // ── Lighting ──────────────────────────────────────────────────────────────
-  scene.add(new THREE.AmbientLight(0xffffff, 0.65));
-  const sun = new THREE.DirectionalLight(0xfff4e0, 1.1);
-  sun.position.set(12, 20, 8);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const sun = new THREE.DirectionalLight(0xffffcc, 1.2);
+  sun.position.set(50, 80, 30);
   scene.add(sun);
+
+  // Visual sun sphere
+  const sunGeometry = new THREE.SphereGeometry(8, 32, 32);
+  const sunMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+  const sunMesh = new THREE.Mesh(sunGeometry, sunMaterial);
+  sunMesh.position.set(50, 80, 30);
+  scene.add(sunMesh);
+
   const fill = new THREE.DirectionalLight(0x8899cc, 0.4);
   fill.position.set(-8, 5, -10);
   scene.add(fill);
@@ -429,12 +438,68 @@ function startGame() {
   createBuilding(30, -30, 12, 8, 12);
   createBuilding(-30, 30, 12, 8, 12);
   createBuilding(30, 30, 12, 8, 12);
-  
+
   // Smaller buildings
   createBuilding(-50, 0, 8, 5, 8);
   createBuilding(50, 0, 8, 5, 8);
   createBuilding(0, -50, 8, 5, 8);
   createBuilding(0, 50, 8, 5, 8);
+
+  // Additional ramps around the map
+  const rampPositions = [
+    { x: -20, z: 0, rotY: 0 },
+    { x: 20, z: 0, rotY: Math.PI },
+    { x: 0, z: -20, rotY: Math.PI / 2 },
+    { x: 0, z: 20, rotY: -Math.PI / 2 },
+    { x: -35, z: -15, rotY: Math.PI / 4 },
+    { x: 35, z: -15, rotY: -Math.PI / 4 },
+    { x: -35, z: 15, rotY: -Math.PI / 4 },
+    { x: 35, z: 15, rotY: Math.PI / 4 },
+  ];
+
+  rampPositions.forEach(ramp => {
+    const rampMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(8, 0.5, 12),
+      accentMat
+    );
+    rampMesh.position.set(ramp.x, 1.5, ramp.z);
+    rampMesh.rotation.y = ramp.rotY;
+    rampMesh.rotation.x = Math.PI / 6; // Tilt for ramp
+    scene.add(rampMesh);
+  });
+
+  // Elevated walkways
+  const walkwayPositions = [
+    { x: 0, z: -25, length: 30, rotY: 0 },
+    { x: 0, z: 25, length: 30, rotY: 0 },
+    { x: -25, z: 0, length: 30, rotY: Math.PI / 2 },
+    { x: 25, z: 0, length: 30, rotY: Math.PI / 2 },
+  ];
+
+  walkwayPositions.forEach(ww => {
+    const walkway = new THREE.Mesh(
+      new THREE.BoxGeometry(ww.length, 0.5, 4),
+      accentMat
+    );
+    walkway.position.set(ww.x, 4, ww.z);
+    walkway.rotation.y = ww.rotY;
+    scene.add(walkway);
+
+    // Support pillars
+    for (let i = 0; i < 3; i++) {
+      const pillar = new THREE.Mesh(
+        new THREE.BoxGeometry(1, 4, 1),
+        wallMat
+      );
+      const offset = (i - 1) * (ww.length / 3);
+      if (ww.rotY === 0) {
+        pillar.position.set(ww.x + offset, 2, ww.z);
+      } else {
+        pillar.position.set(ww.x, 2, ww.z + offset);
+      }
+      scene.add(pillar);
+    }
+  });
 
   // Trees
   const createTree = (x, z) => {
@@ -564,7 +629,7 @@ function startGame() {
   controller.setColliders(mapColliders);
 
   // ── Network ───────────────────────────────────────────────────────────────
-  net = new NetworkManager(SERVER_URL, sessionToken);
+  net = new NetworkManager(SERVER_URL, sessionToken, sessionUsername);
   setupNetworkCallbacks();
 
   // ── FP hands ──────────────────────────────────────────────────────────────
@@ -816,6 +881,10 @@ function setupNetworkCallbacks() {
     if (data.victimId === net.localId) {
       localHealth = Math.max(0, data.health);
       updateHealthUI();
+      // Show damage vignette
+      damageVignette.classList.remove('active');
+      void damageVignette.offsetWidth; // Trigger reflow
+      damageVignette.classList.add('active');
     }
     if (data.shooterId === net.localId) showHitmarker();
   };
