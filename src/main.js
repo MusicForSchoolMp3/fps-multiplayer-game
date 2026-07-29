@@ -552,7 +552,9 @@ function startGame() {
   const fbxLoader = new FBXLoader();
   let ammoModel = null;
 
+  console.log('Loading ammo model from: /Ammo crate.fbx');
   fbxLoader.load('/Ammo crate.fbx', (fbx) => {
+    console.log('Ammo model loaded successfully');
     ammoModel = fbx;
     ammoModel.scale.set(0.05, 0.05, 0.05); // Increased scale
 
@@ -572,6 +574,7 @@ function startGame() {
   }, undefined, (error) => {
     console.error('Error loading FBX model:', error);
     // Fallback to procedural boxes if FBX fails
+    console.log('Falling back to procedural ammo boxes');
     const ammoMat = new THREE.MeshLambertMaterial({ color: 0xffaa00, emissive: 0xff4400, emissiveIntensity: 0.3 });
     ammoPositions.forEach((pos, index) => {
       const ammoBox = new THREE.Mesh(
@@ -599,7 +602,9 @@ function startGame() {
     { x: -55, z: -55 }, { x: 55, z: -55 }, { x: -55, z: 55 }, { x: 55, z: 55 },
   ];
 
+  console.log('Loading tree model from: /Lowpoly_tree_sample.fbx');
   treeLoader.load('/Lowpoly_tree_sample.fbx', (fbx) => {
+    console.log('Tree model loaded successfully');
     const treeModel = fbx;
     treeModel.scale.set(0.03, 0.03, 0.03);
 
@@ -611,6 +616,7 @@ function startGame() {
   }, undefined, (error) => {
     console.error('Error loading tree FBX model:', error);
     // Fallback to procedural trees
+    console.log('Falling back to procedural trees');
     const createTree = (x, z) => {
       const trunk = new THREE.Mesh(
         new THREE.CylinderGeometry(0.3, 0.4, 3, 8),
