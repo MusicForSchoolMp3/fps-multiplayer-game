@@ -1,9 +1,7 @@
 services:
   - type: web
     name: fps-multiplayer-game
-    env: node
+    runtime: node
+    plan: free
     buildCommand: npm install && npm run build
-    startCommand: npm run start:prod
-    envVars:
-      - key: PORT
-        value: 3001
+    startCommand: node server/test-server.js
