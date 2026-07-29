@@ -1,11 +1,10 @@
-// Server with Firebase authentication
+// Simple test server without Firebase authentication
 import { createServer } from 'http';
 import express from 'express';
 import { Server } from 'socket.io';
 import { promises as fs } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import admin from 'firebase-admin';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -14,36 +13,6 @@ const PORT = process.env.PORT || 3001;
 const TICK_MS = 1000 / 30;
 const MAX_HP = 100;
 const RESPAWN_S = 3;
-
-// Initialize Firebase Admin
-let db = null;
-try {
-  if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY) {
-    const serviceAccount = {
-      type: 'service_account',
-      project_id: process.env.FIREBASE_PROJECT_ID,
-      private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
-      private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-      client_email: process.env.FIREBASE_CLIENT_EMAIL,
-      client_id: process.env.FIREBASE_CLIENT_ID,
-      auth_uri: 'https://accounts.google.com/o/oauth2/auth',
-      token_uri: 'https://oauth2.googleapis.com/token',
-      auth_provider_x509_cert_url: 'https://www.googleapis.com/oauth2/v1/certs',
-      client_x509_cert_url: process.env.FIREBASE_CLIENT_X509_CERT_URL,
-    };
-
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-      databaseURL: process.env.FIREBASE_DATABASE_URL,
-    });
-    db = admin.database();
-    console.log('Firebase Admin initialized');
-  } else {
-    console.log('Firebase credentials not found, running without Firebase');
-  }
-} catch (error) {
-  console.error('Firebase initialization error:', error);
-}
 
 const SPAWNS = [
   { x: -60, y: 0, z: 0 },
@@ -62,6 +31,33 @@ let colorCounter = 0;
 let spawnIdx = 0;
 
 const players = new Map();
+const accounts = new Map(); // username -> { uid, totalKills }
+const ACCOUNTS_FILE = join(__dirname, 'accounts.json');
+
+// Load accounts from file
+async function loadAccounts() {
+  try {
+    const data = await fs.readFile(ACCOUNTS_FILE, 'utf8');
+    const parsed = JSON.parse(data);
+    for (const [username, account] of Object.entries(parsed)) {
+      accounts.set(username, account);
+    }
+    console.log(`Loaded ${accounts.size} accounts from file`);
+  } catch (err) {
+    console.log('No existing accounts file, starting fresh');
+  }
+}
+
+// Save accounts to file
+async function saveAccounts() {
+  const obj = {};
+  for (const [username, account] of accounts) {
+    obj[username] = account;
+  }
+  await fs.writeFile(ACCOUNTS_FILE, JSON.stringify(obj, null, 2));
+}
+
+loadAccounts();
 
 function nextSpawn() {
   const s = SPAWNS[spawnIdx % SPAWNS.length];
@@ -71,6 +67,7 @@ function nextSpawn() {
 
 function createPlayer(socket, username) {
   const spawn = nextSpawn();
+  const account = accounts.get(username) || { totalKills: 0 };
   return {
     id: socket.id,
     accountId: username,
@@ -81,7 +78,7 @@ function createPlayer(socket, username) {
     yaw: 0, pitch: 0, speed: 0,
     isGrounded: true,
     health: MAX_HP,
-    kills: 0,
+    kills: account.totalKills || 0,
     deaths: 0,
     isDead: false,
     lastSeen: Date.now(),
@@ -122,52 +119,51 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 // API endpoints for account management (must be before static files)
+app.post('/api/register', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'Missing username or password' });
+
+  if (accounts.has(username)) {
+    return res.status(400).json({ error: 'Username already exists' });
+  }
+
+  // Simple password storage (in production, use bcrypt)
+  accounts.set(username, { uid: username, password, totalKills: 0 });
+  await saveAccounts();
+  res.json({ success: true });
+});
+
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'Missing username or password' });
+
+  const account = accounts.get(username);
+  if (!account || account.password !== password) {
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+
+  res.json({ uid: account.uid, username, totalKills: account.totalKills || 0 });
+});
+
+app.get('/api/me', (req, res) => {
+  const username = req.query.username;
+  if (username && accounts.has(username)) {
+    const account = accounts.get(username);
+    res.json({ uid: account.uid, username, totalKills: account.totalKills || 0 });
+  } else {
+    res.status(401).json({ error: 'Not authenticated' });
+  }
+});
+
 app.post('/api/create-player', async (req, res) => {
   const { uid, username } = req.body || {};
   if (!username) return res.status(400).json({ error: 'Missing username' });
 
-  if (db) {
-    // Use Firebase Realtime Database
-    try {
-      await db.ref(`players/${uid}`).set({
-        username,
-        totalKills: 0,
-        createdAt: Date.now(),
-      });
-      res.json({ success: true });
-    } catch (error) {
-      console.error('Firebase error:', error);
-      res.status(500).json({ error: 'Database error' });
-    }
-  } else {
-    // Fallback to file-based storage
-    res.json({ success: true });
+  if (!accounts.has(username)) {
+    accounts.set(username, { uid: uid || username, totalKills: 0 });
+    await saveAccounts();
   }
-});
-
-app.get('/api/me', async (req, res) => {
-  const token = req.query.token;
-  if (!token) return res.status(401).json({ error: 'Missing token' });
-
-  if (db) {
-    try {
-      const decodedToken = await admin.auth().verifyIdToken(token);
-      const playerRef = db.ref(`players/${decodedToken.uid}`);
-      const snapshot = await playerRef.once('value');
-      const playerData = snapshot.val();
-
-      res.json({
-        uid: decodedToken.uid,
-        username: playerData?.username || decodedToken.email?.split('@')[0] || 'Player',
-        totalKills: playerData?.totalKills || 0,
-      });
-    } catch (error) {
-      console.error('Firebase auth error:', error);
-      res.status(401).json({ error: 'Invalid token' });
-    }
-  } else {
-    res.status(401).json({ error: 'Firebase not configured' });
-  }
+  res.json({ success: true });
 });
 
 // Static file serving (must be after API routes)
@@ -252,13 +248,11 @@ async function killPlayer(victimId, killerId) {
   victim.health = 0;
   if (killer) {
     killer.kills++;
-    // Save kills to Firebase
-    if (db && killer.accountId) {
-      try {
-        await db.ref(`players/${killer.accountId}/totalKills`).set(killer.kills);
-      } catch (error) {
-        console.error('Firebase kill save error:', error);
-      }
+    // Save kills to account
+    if (accounts.has(killer.username)) {
+      const account = accounts.get(killer.username);
+      account.totalKills = killer.kills;
+      await saveAccounts();
     }
   }
   victim.deaths++;

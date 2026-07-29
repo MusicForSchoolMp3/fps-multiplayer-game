@@ -124,7 +124,21 @@ async function bootstrap() {
 }
 
 async function checkSession() {
-  // Always use Firebase authentication
+  // Bypass Firebase auth for test server (localhost or Render)
+  if (SERVER_URL.includes('localhost') || SERVER_URL.includes('onrender.com')) {
+    // Only check session if we have a saved username
+    if (sessionUsername) {
+      const res = await fetch(`${SERVER_URL}/api/me?username=${sessionUsername}`);
+      if (res.ok) {
+        const data = await res.json();
+        sessionToken = 'test-token';
+        sessionUsername = data.username;
+        sessionTotalKills = data.totalKills || 0;
+        return true;
+      }
+    }
+    return false;
+  }
 
   return new Promise((resolve) => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -237,13 +251,29 @@ function setupAuthUI() {
     loginBtn.disabled = true;
     loginBtn.textContent = 'LOGGING IN...';
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, user, pass);
-      const token = await userCredential.user.getIdToken();
-      const res = await fetch(`${SERVER_URL}/api/me?token=${token}`);
-      const data = await res.json();
-      saveSession(token, data.username, data.totalKills || 0);
-      hideAuth();
-      showAccountMenu();
+      if (SERVER_URL.includes('localhost') || SERVER_URL.includes('onrender.com')) {
+        // Bypass Firebase for test server
+        const res = await fetch(`${SERVER_URL}/api/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: user, password: pass }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Login failed');
+        }
+        saveSession('test-token', user, data.totalKills || 0);
+        hideAuth();
+        showAccountMenu();
+      } else {
+        const userCredential = await signInWithEmailAndPassword(auth, user, pass);
+        const token = await userCredential.user.getIdToken();
+        const res = await fetch(`${SERVER_URL}/api/me?token=${token}`);
+        const data = await res.json();
+        saveSession(token, data.username, data.totalKills || 0);
+        hideAuth();
+        showAccountMenu();
+      }
     } catch (error) {
       loginError.textContent = error.message || 'Cannot reach server. Is it running?';
     } finally {
@@ -264,21 +294,37 @@ function setupAuthUI() {
     registerBtn.disabled = true;
     registerBtn.textContent = 'CREATING...';
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, user, pass);
-      const token = await userCredential.user.getIdToken();
+      if (SERVER_URL.includes('localhost') || SERVER_URL.includes('onrender.com')) {
+        // Bypass Firebase for test server
+        const res = await fetch(`${SERVER_URL}/api/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: user, password: pass }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Registration failed');
+        }
+        saveSession('test-token', user, 0);
+        hideAuth();
+        showAccountMenu();
+      } else {
+        const userCredential = await createUserWithEmailAndPassword(auth, user, pass);
+        const token = await userCredential.user.getIdToken();
 
-      // Create player record in Firebase Realtime Database
-      await fetch(`${SERVER_URL}/api/create-player`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uid: userCredential.user.uid, username: user }),
-      });
+        // Create player record in Firebase Realtime Database
+        await fetch(`${SERVER_URL}/api/create-player`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uid: userCredential.user.uid, username: user }),
+        });
 
-      const res = await fetch(`${SERVER_URL}/api/me?token=${token}`);
-      const data = await res.json();
-      saveSession(token, data.username, data.totalKills || 0);
-      hideAuth();
-      showAccountMenu();
+        const res = await fetch(`${SERVER_URL}/api/me?token=${token}`);
+        const data = await res.json();
+        saveSession(token, data.username, data.totalKills || 0);
+        hideAuth();
+        showAccountMenu();
+      }
     } catch (error) {
       regError.textContent = error.message || 'Cannot reach server. Is it running?';
     } finally {
