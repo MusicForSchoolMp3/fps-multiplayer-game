@@ -118,6 +118,7 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 app.use(express.static('dist'));
+app.use(express.static('.')); // Serve root directory for FBX files
 
 // API endpoints for account management
 app.post('/api/create-player', async (req, res) => {

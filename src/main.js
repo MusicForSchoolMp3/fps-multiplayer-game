@@ -592,8 +592,7 @@ function startGame() {
     window.ammoPickups = ammoPickups;
   });
 
-  // Trees - load FBX low poly model
-  const treeLoader = new FBXLoader();
+  // Trees - use procedural trees (FBX has parsing issues)
   const treePositions = [
     { x: -20, z: -20 }, { x: 20, z: -20 }, { x: -20, z: 20 }, { x: 20, z: 20 },
     { x: -60, z: -20 }, { x: 60, z: -20 }, { x: -60, z: 20 }, { x: 60, z: 20 },
@@ -602,38 +601,22 @@ function startGame() {
     { x: -55, z: -55 }, { x: 55, z: -55 }, { x: -55, z: 55 }, { x: 55, z: 55 },
   ];
 
-  console.log('Loading tree model from: /Lowpoly_tree_sample.fbx');
-  treeLoader.load('/Lowpoly_tree_sample.fbx', (fbx) => {
-    console.log('Tree model loaded successfully');
-    const treeModel = fbx;
-    treeModel.scale.set(0.03, 0.03, 0.03);
+  const createTree = (x, z) => {
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.3, 0.4, 3, 8),
+      trunkMat
+    );
+    trunk.position.set(x, 1.5, z);
+    scene.add(trunk);
 
-    treePositions.forEach(pos => {
-      const treeInstance = treeModel.clone();
-      treeInstance.position.set(pos.x, 0, pos.z);
-      scene.add(treeInstance);
-    });
-  }, undefined, (error) => {
-    console.error('Error loading tree FBX model:', error);
-    // Fallback to procedural trees
-    console.log('Falling back to procedural trees');
-    const createTree = (x, z) => {
-      const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.3, 0.4, 3, 8),
-        trunkMat
-      );
-      trunk.position.set(x, 1.5, z);
-      scene.add(trunk);
-
-      const foliage = new THREE.Mesh(
-        new THREE.ConeGeometry(2, 4, 8),
-        treeMat
-      );
-      foliage.position.set(x, 4.5, z);
-      scene.add(foliage);
-    };
-    treePositions.forEach(pos => createTree(pos.x, pos.z));
-  });
+    const foliage = new THREE.Mesh(
+      new THREE.ConeGeometry(2, 4, 8),
+      treeMat
+    );
+    foliage.position.set(x, 4.5, z);
+    scene.add(foliage);
+  };
+  treePositions.forEach(pos => createTree(pos.x, pos.z));
 
   // Central cover structure
   const coverHeight = 3;
@@ -841,18 +824,18 @@ function setupMenuButtons() {
   // Weapon Selection Buttons
   const weaponArBtn = document.getElementById('weapon-ar-btn');
   const weaponSniperBtn = document.getElementById('weapon-sniper-btn');
-  
-  if (weaponArBtn && weaponSystem) {
+
+  if (weaponArBtn && weapon) {
     weaponArBtn.addEventListener('click', () => {
-      weaponSystem.switchWeapon('ar');
+      weapon.switchWeapon('ar');
       weaponArBtn.classList.add('active');
       weaponSniperBtn.classList.remove('active');
     });
   }
-  
-  if (weaponSniperBtn && weaponSystem) {
+
+  if (weaponSniperBtn && weapon) {
     weaponSniperBtn.addEventListener('click', () => {
-      weaponSystem.switchWeapon('sniper');
+      weapon.switchWeapon('sniper');
       weaponSniperBtn.classList.add('active');
       weaponArBtn.classList.remove('active');
     });
