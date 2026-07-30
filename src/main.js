@@ -146,19 +146,11 @@ const MOVE_INTERVAL   = 1000 / TICK_RATE;
 async function bootstrap() {
   setupAuthUI();
   setupMenuButtons();
-  // Try to load saved session first
-  if (loadSession()) {
-    const ok = await checkSession();
-    if (ok) {
-      hideAuth();
-      showAccountMenu();
-    }
-  } else {
-    const ok = await checkSession();
-    if (ok) {
-      hideAuth();
-      showAccountMenu();
-    }
+  // Always try to check session with JWT token
+  const ok = await checkSession();
+  if (ok) {
+    hideAuth();
+    showAccountMenu();
   }
 }
 
@@ -817,7 +809,8 @@ function setupMenuButtons() {
     menuGunsBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       accountMenu.style.display = 'none';
-      openGunsModal();
+      const gunsModal = document.getElementById('guns-modal');
+      if (gunsModal) gunsModal.style.display = 'flex';
     });
   }
 
@@ -839,6 +832,16 @@ function setupMenuButtons() {
     menuSignoutBtn.addEventListener('click', signOut);
   }
 
+  // Menu Head Bob Toggle
+  const menuHeadBob = document.getElementById('menu-head-bob');
+  if (menuHeadBob) {
+    menuHeadBob.addEventListener('change', () => {
+      if (controller) {
+        controller.enableHeadBob = menuHeadBob.checked;
+      }
+    });
+  }
+
   // Lock Screen Menu Button
   const lockMenuBtn = document.getElementById('lock-menu-btn');
   if (lockMenuBtn) {
@@ -858,7 +861,9 @@ function setupMenuButtons() {
       weapon.switchWeapon('ar');
       weaponArBtn.classList.add('active');
       weaponSniperBtn.classList.remove('active');
-      closeGunsModal();
+      const gunsModal = document.getElementById('guns-modal');
+      if (gunsModal) gunsModal.style.display = 'none';
+      if (!isGameStarted) accountMenu.style.display = 'flex';
     });
   }
 
@@ -867,7 +872,19 @@ function setupMenuButtons() {
       weapon.switchWeapon('sniper');
       weaponSniperBtn.classList.add('active');
       weaponArBtn.classList.remove('active');
-      closeGunsModal();
+      const gunsModal = document.getElementById('guns-modal');
+      if (gunsModal) gunsModal.style.display = 'none';
+      if (!isGameStarted) accountMenu.style.display = 'flex';
+    });
+  }
+
+  // Guns Modal Close Button
+  const gunsCloseBtn = document.getElementById('guns-close-btn');
+  if (gunsCloseBtn) {
+    gunsCloseBtn.addEventListener('click', () => {
+      const gunsModal = document.getElementById('guns-modal');
+      if (gunsModal) gunsModal.style.display = 'none';
+      if (!isGameStarted) accountMenu.style.display = 'flex';
     });
   }
 }
@@ -890,27 +907,6 @@ function setupInput() {
   if (settingsResumeBtn) settingsResumeBtn.addEventListener('click', closeSettings);
   if (settingsCloseBtn)  settingsCloseBtn.addEventListener('click', closeSettings);
   if (settingsSignoutBtn) settingsSignoutBtn.addEventListener('click', signOut);
-
-  // Guns Modal
-  const gunsModal = document.getElementById('guns-modal');
-  const gunsCloseBtn = document.getElementById('guns-close-btn');
-  const settingsGunsBtn = document.getElementById('settings-guns-btn');
-  const menuGunsBtn = document.getElementById('menu-guns-btn');
-
-  const openGunsModal = () => {
-    gunsModal.style.display = 'flex';
-  };
-
-  const closeGunsModal = () => {
-    gunsModal.style.display = 'none';
-    if (!isGameStarted) {
-      accountMenu.style.display = 'flex';
-    }
-  };
-
-  if (settingsGunsBtn) settingsGunsBtn.addEventListener('click', openGunsModal);
-  if (menuGunsBtn) menuGunsBtn.addEventListener('click', openGunsModal);
-  if (gunsCloseBtn) gunsCloseBtn.addEventListener('click', closeGunsModal);
 
   // Settings: Head Bob Toggle
   if (settingHeadBob) {

@@ -637,6 +637,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 20px;
   z-index: 450;
 }
 
@@ -1177,6 +1178,59 @@ input:checked + .toggle-slider:before {
   margin-top: 0;
   max-width: 250px;
   z-index: 10;
+}
+
+/* ─── Menu Side Settings Panel ─────────────────────────────────────────────────── */
+#menu-side-settings {
+  width: 280px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 24px;
+  backdrop-filter: blur(24px);
+  box-shadow: 0 30px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.side-settings-header {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: 2px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.side-settings-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.side-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.side-setting-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.side-setting-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.side-setting-desc {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
 }
 
 /* ─── Guns Modal ──────────────────────────────────────────────────────────────── */

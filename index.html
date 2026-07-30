@@ -94,7 +94,6 @@
       <div id="menu-actions">
         <button id="menu-play-btn" class="menu-btn primary-btn">PLAY MATCH</button>
         <button id="menu-guns-btn" class="menu-btn secondary-btn">🔫 GUNS</button>
-        <button id="menu-settings-btn" class="menu-btn secondary-btn">⚙ SETTINGS</button>
         <button id="menu-signout-btn" class="menu-btn danger-btn">🚪 SIGN OUT</button>
       </div>
 
@@ -102,6 +101,23 @@
       <div id="menu-update-log" class="update-log">
         <div class="update-log-header">📝 UPDATE LOG</div>
         <div class="update-log-content" id="menu-update-log-content"></div>
+      </div>
+    </div>
+
+    <!-- Side Settings Panel -->
+    <div id="menu-side-settings">
+      <div class="side-settings-header">⚙ SETTINGS</div>
+      <div class="side-settings-content">
+        <div class="side-setting-row">
+          <div class="side-setting-info">
+            <span class="side-setting-title">Walk Animation</span>
+            <span class="side-setting-desc">Head bobbing while walking</span>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="menu-head-bob" checked />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
       </div>
     </div>
   </div>
