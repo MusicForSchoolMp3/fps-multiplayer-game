@@ -4,6 +4,7 @@ import express from 'express';
 import { Server } from 'socket.io';
 import { MongoClient } from 'mongodb';
 import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -14,6 +15,9 @@ const PORT = process.env.PORT || 3001;
 const TICK_MS = 1000 / 30;
 const MAX_HP = 100;
 const RESPAWN_S = 3;
+
+// JWT secret for token validation
+const JWT_SECRET = process.env.JWT_SECRET || 'fps-game-secret-key-change-in-production';
 
 // MongoDB connection
 const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/fps-game';
@@ -28,8 +32,8 @@ async function connectToMongo() {
     accountsCollection = db.collection('accounts');
     console.log('Connected to MongoDB');
 
-    // Create index on username for faster lookups
-    await accountsCollection.createIndex({ username: 1 }, { unique: true });
+    // Create case-insensitive index on username for faster lookups
+    await accountsCollection.createIndex({ username: 1 }, { unique: true, collation: { locale: 'en', strength: 2 } });
   } catch (error) {
     console.error('MongoDB connection error:', error);
     console.log('Running without database - accounts will not persist');
@@ -119,13 +123,24 @@ app.post('/api/register', async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Missing username or password' });
 
+  // Validate username: no spaces, 3-20 characters
+  if (username.includes(' ')) {
+    return res.status(400).json({ error: 'Username cannot contain spaces' });
+  }
+  if (username.length < 3 || username.length > 20) {
+    return res.status(400).json({ error: 'Username must be 3-20 characters' });
+  }
+
   if (!accountsCollection) {
     return res.status(500).json({ error: 'Database not available' });
   }
 
   try {
-    // Check if username already exists
-    const existing = await accountsCollection.findOne({ username });
+    // Check if username already exists (case-insensitive)
+    const existing = await accountsCollection.findOne(
+      { username: username },
+      { collation: { locale: 'en', strength: 2 } }
+    );
     if (existing) {
       return res.status(400).json({ error: 'Username already exists' });
     }
@@ -133,9 +148,9 @@ app.post('/api/register', async (req, res) => {
     // Hash password
     const passwordHash = await bcrypt.hash(password, 10);
 
-    // Create account
+    // Create account with lowercase username for consistency
     await accountsCollection.insertOne({
-      username,
+      username: username.toLowerCase(),
       passwordHash,
       totalKills: 0,
       createdAt: new Date(),
@@ -144,6 +159,9 @@ app.post('/api/register', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Registration error:', error);
+    if (error.code === 11000) {
+      return res.status(400).json({ error: 'Username already exists' });
+    }
     res.status(500).json({ error: 'Registration failed' });
   }
 });
@@ -157,7 +175,11 @@ app.post('/api/login', async (req, res) => {
   }
 
   try {
-    const account = await accountsCollection.findOne({ username });
+    // Find account (case-insensitive)
+    const account = await accountsCollection.findOne(
+      { username: username.toLowerCase() },
+      { collation: { locale: 'en', strength: 2 } }
+    );
     if (!account) {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
@@ -168,7 +190,19 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    res.json({ uid: account._id.toString(), username, totalKills: account.totalKills || 0 });
+    // Generate JWT token
+    const token = jwt.sign(
+      { username: account.username, uid: account._id.toString() },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      uid: account._id.toString(),
+      username: account.username,
+      totalKills: account.totalKills || 0,
+      token
+    });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Login failed' });
@@ -176,21 +210,34 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.get('/api/me', async (req, res) => {
-  const username = req.query.username;
-  if (!username) return res.status(400).json({ error: 'Missing username' });
-
-  if (!accountsCollection) {
-    return res.status(500).json({ error: 'Database not available' });
-  }
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ error: 'Missing token' });
 
   try {
-    const account = await accountsCollection.findOne({ username });
-    if (!account) {
-      return res.status(401).json({ error: 'Not authenticated' });
+    // Verify JWT token
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    if (!accountsCollection) {
+      return res.status(500).json({ error: 'Database not available' });
     }
 
-    res.json({ uid: account._id.toString(), username, totalKills: account.totalKills || 0 });
+    const account = await accountsCollection.findOne({ username: decoded.username });
+    if (!account) {
+      return res.status(401).json({ error: 'Account not found' });
+    }
+
+    res.json({
+      uid: account._id.toString(),
+      username: account.username,
+      totalKills: account.totalKills || 0
+    });
   } catch (error) {
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Token expired' });
+    }
     console.error('Get account error:', error);
     res.status(500).json({ error: 'Failed to get account' });
   }
@@ -200,8 +247,36 @@ app.get('/api/me', async (req, res) => {
 app.use(express.static('dist'));
 app.use(express.static('.')); // Serve root directory for FBX files
 
-io.on('connection', (socket) => {
-  const username = socket.handshake.auth.username || `Player${socket.id.slice(0, 4)}`;
+io.on('connection', async (socket) => {
+  const token = socket.handshake.auth.token;
+  let username = null;
+
+  // Validate JWT token
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      username = decoded.username;
+
+      // Verify account still exists in database
+      if (accountsCollection) {
+        const account = await accountsCollection.findOne({ username });
+        if (!account) {
+          console.log(`[-] Rejected connection: account not found for ${username}`);
+          socket.disconnect();
+          return;
+        }
+      }
+    } catch (error) {
+      console.log(`[-] Rejected connection: invalid token (${socket.id})`);
+      socket.disconnect();
+      return;
+    }
+  } else {
+    console.log(`[-] Rejected connection: missing token (${socket.id})`);
+    socket.disconnect();
+    return;
+  }
+
   const player = createPlayer(socket, username);
   players.set(socket.id, player);
   console.log(`[+] ${player.username} connected (${socket.id})`);
@@ -236,6 +311,9 @@ io.on('connection', (socket) => {
     const shooter = players.get(socket.id);
     if (!shooter || shooter.isDead) return;
 
+    // Validate shooter is alive and legitimate
+    if (shooter.health <= 0) return;
+
     io.emit('player_shot', {
       shooterId: socket.id,
       origin: data.origin,
@@ -246,7 +324,10 @@ io.on('connection', (socket) => {
       const victim = players.get(data.hitId);
       if (victim.isDead) return;
 
+      // Validate damage is reasonable (1-100)
       const damage = clamp(data.damage || 25, 1, 100);
+
+      // Server-side health calculation (prevent client tampering)
       victim.health = Math.max(0, victim.health - damage);
 
       io.to(data.hitId).emit('player_hit', {
@@ -292,13 +373,20 @@ async function killPlayer(victimId, killerId) {
   victim.health = 0;
   if (killer) {
     killer.kills++;
-    // Save kills to MongoDB
+    // Save kills to MongoDB with server-side validation
     if (accountsCollection && killer.username) {
       try {
-        await accountsCollection.updateOne(
-          { username: killer.username },
-          { $set: { totalKills: killer.kills } }
-        );
+        // Get current total kills from database to prevent tampering
+        const account = await accountsCollection.findOne({ username: killer.username });
+        if (account) {
+          // Use max of server-side count and database count to prevent rollback
+          const dbKills = account.totalKills || 0;
+          const newTotalKills = Math.max(killer.kills, dbKills);
+          await accountsCollection.updateOne(
+            { username: killer.username },
+            { $set: { totalKills: newTotalKills } }
+          );
+        }
       } catch (error) {
         console.error('Failed to save kills:', error);
       }

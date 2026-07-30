@@ -1114,3 +1114,87 @@ input:checked + .toggle-slider:before {
 #chat-messages::-webkit-scrollbar-thumb:hover {
   background: rgba(255,255,255,0.3);
 }
+
+/* ─── Update Log ─────────────────────────────────────────────────────────────── */
+.update-log {
+  margin-top: 20px;
+  padding: 15px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.update-log-header {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 10px;
+  letter-spacing: 1px;
+}
+
+.update-log-content {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.6;
+}
+
+.update-log-content .update-entry {
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.update-log-content .update-entry:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.update-log-content .update-date {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 4px;
+}
+
+.update-log-content .update-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.update-log-content .update-bullet {
+  color: #ff8844;
+}
+
+.settings-update-log {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  margin-top: 0;
+  max-width: 250px;
+  z-index: 10;
+}
+
+/* ─── Guns Modal ──────────────────────────────────────────────────────────────── */
+#guns-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.85);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+#guns-card {
+  background: linear-gradient(135deg, rgba(20, 20, 30, 0.95), rgba(10, 10, 20, 0.98));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 30px;
+  width: 90%;
+  max-width: 400px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}

@@ -52,6 +52,12 @@
         <div id="reg-error" class="auth-error"></div>
         <button id="register-btn" class="auth-submit">CREATE ACCOUNT</button>
       </div>
+
+      <!-- Update Log -->
+      <div id="auth-update-log" class="update-log">
+        <div class="update-log-header">📝 UPDATE LOG</div>
+        <div class="update-log-content" id="auth-update-log-content"></div>
+      </div>
     </div>
   </div>
 
@@ -90,6 +96,12 @@
         <button id="menu-settings-btn" class="menu-btn secondary-btn">⚙ SETTINGS</button>
         <button id="menu-signout-btn" class="menu-btn danger-btn">🚪 SIGN OUT</button>
       </div>
+
+      <!-- Update Log -->
+      <div id="menu-update-log" class="update-log">
+        <div class="update-log-header">📝 UPDATE LOG</div>
+        <div class="update-log-content" id="menu-update-log-content"></div>
+      </div>
     </div>
   </div>
 
@@ -116,25 +128,38 @@
         </div>
       </div>
 
-      <div class="settings-section">
-        <h3>WEAPONS</h3>
-        <div class="weapon-grid">
-          <button id="weapon-ar-btn" class="weapon-btn active">
-            <div class="weapon-icon">🔫</div>
-            <div class="weapon-name">AR</div>
-            <div class="weapon-stats">30/90 • 25 DMG</div>
-          </button>
-          <button id="weapon-sniper-btn" class="weapon-btn">
-            <div class="weapon-icon">🎯</div>
-            <div class="weapon-name">SNIPER</div>
-            <div class="weapon-stats">1/10 • 100 DMG</div>
-          </button>
-        </div>
-      </div>
-
       <div class="settings-actions">
         <button id="settings-resume-btn" class="menu-btn primary-btn">RESUME GAME</button>
+        <button id="settings-guns-btn" class="menu-btn secondary-btn">🔫 GUNS</button>
         <button id="settings-signout-btn" class="menu-btn danger-btn">SIGN OUT</button>
+      </div>
+
+      <!-- Update Log (top left) -->
+      <div id="settings-update-log" class="update-log settings-update-log">
+        <div class="update-log-header">� UPDATE LOG</div>
+        <div class="update-log-content" id="settings-update-log-content"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Guns Selection Modal ─────────────────────────────────────────────────── -->
+  <div id="guns-modal" style="display:none;">
+    <div id="guns-card">
+      <div class="settings-header">
+        <h2>SELECT WEAPON</h2>
+        <span class="settings-close" id="guns-close-btn">&times;</span>
+      </div>
+      <div class="weapon-grid">
+        <button id="weapon-ar-btn" class="weapon-btn active">
+          <div class="weapon-icon">🔫</div>
+          <div class="weapon-name">AR</div>
+          <div class="weapon-stats">30/90 • 25 DMG</div>
+        </button>
+        <button id="weapon-sniper-btn" class="weapon-btn">
+          <div class="weapon-icon">🎯</div>
+          <div class="weapon-name">SNIPER</div>
+          <div class="weapon-stats">1/10 • 100 DMG</div>
+        </button>
       </div>
     </div>
   </div>

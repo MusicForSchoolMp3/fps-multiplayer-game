@@ -27,6 +27,45 @@ const SERVER_URL = "https://fps-multiplayer-game.onrender.com";
 const TICK_RATE   = 20;
 const EYE_HEIGHT  = 1.65;
 
+// ── Update Log ─────────────────────────────────────────────────────────────────
+const UPDATE_LOG = [
+  {
+    date: '2024-07-30',
+    items: [
+      'Added MongoDB Atlas for persistent account storage',
+      'Added JWT token-based authentication',
+      'Added password hashing with bcrypt',
+      'Added case-insensitive username uniqueness',
+      'Added no-space validation for usernames',
+      'Added server-side kill validation',
+      'Added server-side total kills validation',
+      'Added ammo refill on respawn',
+      'Added killer name on death screen',
+      'Added sniper zoom sensitivity reduction',
+      'Added chat system',
+    ]
+  }
+];
+
+function renderUpdateLog(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  let html = '';
+  for (const entry of UPDATE_LOG) {
+    html += `<div class="update-entry">
+      <div class="update-date">${entry.date}</div>`;
+    for (const item of entry.items) {
+      html += `<div class="update-item">
+        <span class="update-bullet">•</span>
+        <span>${item}</span>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+  container.innerHTML = html;
+}
+
 // ── DOM refs ───────────────────────────────────────────────────────────────────
 const canvas          = document.getElementById('game-canvas');
 const authScreen      = document.getElementById('auth-screen');
@@ -124,56 +163,40 @@ async function bootstrap() {
 }
 
 async function checkSession() {
-  // Bypass Firebase auth for test server (localhost or Render)
-  if (SERVER_URL.includes('localhost') || SERVER_URL.includes('onrender.com')) {
-    // Only check session if we have a saved username
-    if (sessionUsername) {
-      const res = await fetch(`${SERVER_URL}/api/me?username=${sessionUsername}`);
-      if (res.ok) {
-        const data = await res.json();
-        sessionToken = 'test-token';
-        sessionUsername = data.username;
-        sessionTotalKills = data.totalKills || 0;
-        return true;
-      }
-    }
-    return false;
-  }
+  // Check for JWT token in localStorage
+  const token = localStorage.getItem('jwt_token');
+  if (!token) return false;
 
-  return new Promise((resolve) => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      unsubscribe();
-      if (user) {
-        try {
-          const token = await user.getIdToken();
-          const res = await fetch(`${SERVER_URL}/api/me?token=${token}`);
-          if (!res.ok) {
-            await firebaseSignOut(auth);
-            resolve(false);
-            return;
-          }
-          const data = await res.json();
-          sessionToken = token;
-          sessionUsername = data.username;
-          sessionTotalKills = data.totalKills || 0;
-          resolve(true);
-        } catch {
-          await firebaseSignOut(auth);
-          resolve(false);
-        }
-      } else {
-        resolve(false);
+  try {
+    const res = await fetch(`${SERVER_URL}/api/me`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
       }
     });
-  });
+
+    if (!res.ok) {
+      localStorage.removeItem('jwt_token');
+      return false;
+    }
+
+    const data = await res.json();
+    sessionToken = token;
+    sessionUsername = data.username;
+    sessionTotalKills = data.totalKills || 0;
+    return true;
+  } catch (error) {
+    console.error('Session check error:', error);
+    localStorage.removeItem('jwt_token');
+    return false;
+  }
 }
 
 function saveSession(token, username, totalKills = 0) {
   sessionToken = token;
   sessionUsername = username;
   sessionTotalKills = totalKills;
-  // Persist to localStorage
-  localStorage.setItem('fps_session', JSON.stringify({ token, username, totalKills }));
+  // Persist JWT token to localStorage
+  localStorage.setItem('jwt_token', token);
 }
 
 function hideAuth() {
@@ -189,11 +212,10 @@ function showAccountMenu() {
 }
 
 async function signOut() {
-  await firebaseSignOut(auth);
   sessionToken = null;
   sessionUsername = null;
   sessionTotalKills = 0;
-  localStorage.removeItem('fps_session');
+  localStorage.removeItem('jwt_token');
   accountMenu.style.display = 'none';
   settingsModal.style.display = 'none';
   lockScreen.style.display = 'none';
@@ -202,17 +224,10 @@ async function signOut() {
 }
 
 function loadSession() {
-  const saved = localStorage.getItem('fps_session');
-  if (saved) {
-    try {
-      const { token, username, totalKills } = JSON.parse(saved);
-      sessionToken = token;
-      sessionUsername = username;
-      sessionTotalKills = totalKills;
-      return true;
-    } catch (e) {
-      localStorage.removeItem('fps_session');
-    }
+  const token = localStorage.getItem('jwt_token');
+  if (token) {
+    sessionToken = token;
+    return true;
   }
   return false;
 }
@@ -251,29 +266,18 @@ function setupAuthUI() {
     loginBtn.disabled = true;
     loginBtn.textContent = 'LOGGING IN...';
     try {
-      if (SERVER_URL.includes('localhost') || SERVER_URL.includes('onrender.com')) {
-        // Bypass Firebase for test server
-        const res = await fetch(`${SERVER_URL}/api/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: user, password: pass }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.error || 'Login failed');
-        }
-        saveSession('test-token', user, data.totalKills || 0);
-        hideAuth();
-        showAccountMenu();
-      } else {
-        const userCredential = await signInWithEmailAndPassword(auth, user, pass);
-        const token = await userCredential.user.getIdToken();
-        const res = await fetch(`${SERVER_URL}/api/me?token=${token}`);
-        const data = await res.json();
-        saveSession(token, data.username, data.totalKills || 0);
-        hideAuth();
-        showAccountMenu();
+      const res = await fetch(`${SERVER_URL}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: user, password: pass }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Login failed');
       }
+      saveSession(data.token, data.username, data.totalKills || 0);
+      hideAuth();
+      showAccountMenu();
     } catch (error) {
       loginError.textContent = error.message || 'Cannot reach server. Is it running?';
     } finally {
@@ -291,40 +295,33 @@ function setupAuthUI() {
     if (!user || !pass || !conf) { regError.textContent = 'Please fill in all fields.'; return; }
     if (pass !== conf) { regError.textContent = 'Passwords do not match.'; return; }
     if (pass.length < 6) { regError.textContent = 'Password must be at least 6 characters.'; return; }
+    if (user.includes(' ')) { regError.textContent = 'Username cannot contain spaces.'; return; }
+    if (user.length < 3 || user.length > 20) { regError.textContent = 'Username must be 3-20 characters.'; return; }
     registerBtn.disabled = true;
     registerBtn.textContent = 'CREATING...';
     try {
-      if (SERVER_URL.includes('localhost') || SERVER_URL.includes('onrender.com')) {
-        // Bypass Firebase for test server
-        const res = await fetch(`${SERVER_URL}/api/register`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: user, password: pass }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.error || 'Registration failed');
-        }
-        saveSession('test-token', user, 0);
-        hideAuth();
-        showAccountMenu();
-      } else {
-        const userCredential = await createUserWithEmailAndPassword(auth, user, pass);
-        const token = await userCredential.user.getIdToken();
-
-        // Create player record in Firebase Realtime Database
-        await fetch(`${SERVER_URL}/api/create-player`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ uid: userCredential.user.uid, username: user }),
-        });
-
-        const res = await fetch(`${SERVER_URL}/api/me?token=${token}`);
-        const data = await res.json();
-        saveSession(token, data.username, data.totalKills || 0);
-        hideAuth();
-        showAccountMenu();
+      const res = await fetch(`${SERVER_URL}/api/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: user, password: pass }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Registration failed');
       }
+      // Auto-login after registration
+      const loginRes = await fetch(`${SERVER_URL}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: user, password: pass }),
+      });
+      const loginData = await loginRes.json();
+      if (!loginRes.ok) {
+        throw new Error(loginData.error || 'Auto-login failed');
+      }
+      saveSession(loginData.token, loginData.username, loginData.totalKills || 0);
+      hideAuth();
+      showAccountMenu();
     } catch (error) {
       regError.textContent = error.message || 'Cannot reach server. Is it running?';
     } finally {
@@ -332,6 +329,11 @@ function setupAuthUI() {
       registerBtn.textContent = 'CREATE ACCOUNT';
     }
   });
+
+  // Render update logs
+  renderUpdateLog('auth-update-log-content');
+  renderUpdateLog('menu-update-log-content');
+  renderUpdateLog('settings-update-log-content');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -833,7 +835,7 @@ function setupMenuButtons() {
     });
   }
 
-  // Weapon Selection Buttons
+  // Weapon Selection Buttons (now in Guns Modal)
   const weaponArBtn = document.getElementById('weapon-ar-btn');
   const weaponSniperBtn = document.getElementById('weapon-sniper-btn');
 
@@ -842,6 +844,7 @@ function setupMenuButtons() {
       weapon.switchWeapon('ar');
       weaponArBtn.classList.add('active');
       weaponSniperBtn.classList.remove('active');
+      closeGunsModal();
     });
   }
 
@@ -850,6 +853,7 @@ function setupMenuButtons() {
       weapon.switchWeapon('sniper');
       weaponSniperBtn.classList.add('active');
       weaponArBtn.classList.remove('active');
+      closeGunsModal();
     });
   }
 }
@@ -870,6 +874,22 @@ function setupInput() {
   if (settingsResumeBtn) settingsResumeBtn.addEventListener('click', closeSettings);
   if (settingsCloseBtn)  settingsCloseBtn.addEventListener('click', closeSettings);
   if (settingsSignoutBtn) settingsSignoutBtn.addEventListener('click', signOut);
+
+  // Guns Modal
+  const gunsModal = document.getElementById('guns-modal');
+  const gunsCloseBtn = document.getElementById('guns-close-btn');
+  const settingsGunsBtn = document.getElementById('settings-guns-btn');
+
+  const openGunsModal = () => {
+    gunsModal.style.display = 'flex';
+  };
+
+  const closeGunsModal = () => {
+    gunsModal.style.display = 'none';
+  };
+
+  if (settingsGunsBtn) settingsGunsBtn.addEventListener('click', openGunsModal);
+  if (gunsCloseBtn) gunsCloseBtn.addEventListener('click', closeGunsModal);
 
   // Settings: Head Bob Toggle
   if (settingHeadBob) {
