@@ -25,6 +25,7 @@ export class NetworkManager {
     this.onDied        = null; // (data) => {}
     this.onRespawn     = null; // (data) => {}
     this.onHealthSync  = null; // (id, health) => {}
+    this.onChatMessage = null; // (data) => {}
 
     this._setupEvents();
 
@@ -95,6 +96,10 @@ export class NetworkManager {
 
     this.socket.on('health_update', (data) => {
       if (this.onHealthSync) this.onHealthSync(data.id, data.health);
+    });
+
+    this.socket.on('chat_message', (data) => {
+      if (this.onChatMessage) this.onChatMessage(data);
     });
   }
 

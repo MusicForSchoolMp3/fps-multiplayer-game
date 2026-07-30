@@ -898,6 +898,16 @@ function setupInput() {
   document.addEventListener('keydown', (e) => {
     if (e.code === 'Tab') { e.preventDefault(); scoreboard.style.display = 'block'; }
     if (e.code === 'KeyV') toggleThirdPerson();
+    if (e.code === 'Slash') {
+      e.preventDefault();
+      toggleChat();
+      const chatInput = document.getElementById('chat-input');
+      if (chatInput) chatInput.focus();
+    }
+    if (e.code === 'BracketLeft') {
+      e.preventDefault();
+      toggleChat();
+    }
     if (e.code === 'Escape') {
       if (settingsModal.style.display === 'flex') {
         closeSettings();
@@ -906,10 +916,86 @@ function setupInput() {
         lockScreen.style.display = 'none';
       }
     }
+    if (e.code === 'Enter') {
+      const chatInput = document.getElementById('chat-input');
+      if (chatInput && document.activeElement === chatInput) {
+        e.preventDefault();
+        sendChatMessage();
+      }
+    }
   });
   document.addEventListener('keyup', (e) => {
     if (e.code === 'Tab') scoreboard.style.display = 'none';
   });
+
+  // Chat toggle button
+  const chatToggleBtn = document.getElementById('chat-toggle-btn');
+  if (chatToggleBtn) {
+    chatToggleBtn.addEventListener('click', toggleChat);
+  }
+
+  // Chat input submit
+  const chatInput = document.getElementById('chat-input');
+  if (chatInput) {
+    chatInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        sendChatMessage();
+      }
+    });
+  }
+}
+
+// ── Chat System ────────────────────────────────────────────────────────────────
+let chatVisible = false;
+
+function toggleChat() {
+  const chatPanel = document.getElementById('chat-panel');
+  if (!chatPanel) return;
+
+  chatVisible = !chatVisible;
+  chatPanel.style.display = chatVisible ? 'flex' : 'none';
+
+  if (chatVisible) {
+    const chatInput = document.getElementById('chat-input');
+    if (chatInput) chatInput.focus();
+  } else {
+    if (controller && !isDead) controller.lock();
+  }
+}
+
+function sendChatMessage() {
+  const chatInput = document.getElementById('chat-input');
+  if (!chatInput || !net) return;
+
+  const message = chatInput.value.trim();
+  if (!message) return;
+
+  net.socket.emit('chat_message', { message });
+  chatInput.value = '';
+
+  // Keep chat open after sending
+  chatInput.focus();
+}
+
+function addChatMessage(username, message) {
+  const chatMessages = document.getElementById('chat-messages');
+  if (!chatMessages) return;
+
+  const messageEl = document.createElement('div');
+  messageEl.className = 'chat-message';
+  messageEl.innerHTML = `
+    <span class="chat-username">${username}:</span>
+    <span class="chat-text">${message}</span>
+  `;
+
+  chatMessages.appendChild(messageEl);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+
+  // Limit to 50 messages
+  while (chatMessages.children.length > 50) {
+    chatMessages.removeChild(chatMessages.firstChild);
+  }
 }
 
 // ── Third-person toggle ────────────────────────────────────────────────────────
@@ -1020,6 +1106,10 @@ function setupNetworkCallbacks() {
       );
     }
     updateScoreboard();
+  };
+
+  net.onChatMessage = (data) => {
+    addChatMessage(data.username, data.message);
   };
 
   net.onRespawn = (data) => {
@@ -1182,8 +1272,15 @@ function gameLoop() {
         if (weapon && weapon.addAmmo) {
           weapon.addAmmo(pickup.userData.ammoAmount);
         }
-        scene.remove(pickup);
-        window.ammoPickups.splice(i, 1);
+        // Hide pickup and set respawn timer (30 seconds)
+        pickup.visible = false;
+        pickup.userData.respawnTime = now + 30000; // 30 seconds
+      }
+
+      // Check for respawn
+      if (!pickup.visible && pickup.userData.respawnTime && now >= pickup.userData.respawnTime) {
+        pickup.visible = true;
+        pickup.userData.respawnTime = null;
       }
     }
   }

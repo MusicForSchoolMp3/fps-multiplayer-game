@@ -233,6 +233,20 @@ io.on('connection', (socket) => {
 
   socket.on('ping_req', () => socket.emit('pong_res'));
 
+  socket.on('chat_message', (data) => {
+    const p = players.get(socket.id);
+    if (!p) return;
+
+    const message = (data.message || '').trim().slice(0, 100);
+    if (!message) return;
+
+    io.emit('chat_message', {
+      username: p.username,
+      message: message,
+      timestamp: Date.now(),
+    });
+  });
+
   socket.on('disconnect', () => {
     players.delete(socket.id);
     io.emit('player_leave', socket.id);
