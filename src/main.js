@@ -92,6 +92,7 @@ const accountMenu        = document.getElementById('account-menu');
 const menuUsername       = document.getElementById('menu-username');
 const menuTotalKills     = document.getElementById('menu-total-kills');
 const menuPlayBtn        = document.getElementById('menu-play-btn');
+const menuGunsBtn        = document.getElementById('menu-guns-btn');
 const menuSettingsBtn    = document.getElementById('menu-settings-btn');
 const menuSignoutBtn     = document.getElementById('menu-signout-btn');
 
@@ -948,6 +949,11 @@ function setupInput() {
     if (e.code === 'Escape') {
       if (settingsModal.style.display === 'flex') {
         closeSettings();
+      } else if (accountMenu.style.display === 'flex') {
+        accountMenu.style.display = 'none';
+        if (isGameStarted && !isDead) {
+          lockScreen.style.display = 'flex';
+        }
       } else if (isGameStarted && !isDead) {
         settingsModal.style.display = 'flex';
         lockScreen.style.display = 'none';
