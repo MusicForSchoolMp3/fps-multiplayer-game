@@ -30,6 +30,8 @@ export class PlayerController {
 
     // Mouse sensitivity
     this.sensitivity = 0.0018;
+    this.baseSensitivity = 0.0018;
+    this.zoomSensitivityMultiplier = 1.0;
 
     // Bob
     this._bobTime  = 0;
@@ -67,8 +69,8 @@ export class PlayerController {
 
     document.addEventListener('mousemove', (e) => {
       if (!this._locked || !this.isAlive) return;
-      this.yaw   -= e.movementX * this.sensitivity;
-      this.pitch -= e.movementY * this.sensitivity;
+      this.yaw   -= e.movementX * this.sensitivity * this.zoomSensitivityMultiplier;
+      this.pitch -= e.movementY * this.sensitivity * this.zoomSensitivityMultiplier;
       this.pitch  = Math.max(-Math.PI * 0.48, Math.min(Math.PI * 0.48, this.pitch));
     });
 

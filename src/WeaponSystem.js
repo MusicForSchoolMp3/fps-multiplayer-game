@@ -137,7 +137,12 @@ export class WeaponSystem {
       const targetFov = this._rightMouseDown ? 20 : this.baseFov;
       this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 10 * delta);
       this.camera.updateProjectionMatrix();
-      
+
+      // Slow down turn sensitivity when zoomed
+      if (this.controller) {
+        this.controller.zoomSensitivityMultiplier = this._rightMouseDown ? 0.3 : 1.0;
+      }
+
       // Toggle vignette
       const vignette = document.getElementById('sniper-vignette');
       if (vignette) {
@@ -288,5 +293,12 @@ export class WeaponSystem {
     if (this.ui.ammoEl)    this.ui.ammoEl.textContent    = this.ammo;
     if (this.ui.reserveEl) this.ui.reserveEl.textContent = this.reserve;
     if (this.ui.weaponEl)  this.ui.weaponEl.textContent  = WEAPONS[this.currentWeapon].name;
+  }
+
+  refillAmmo() {
+    const config = WEAPONS[this.currentWeapon];
+    this.ammo = config.maxAmmo;
+    this.reserve = config.reserveMax;
+    this._updateUI();
   }
 }

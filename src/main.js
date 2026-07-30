@@ -1090,6 +1090,11 @@ function setupNetworkCallbacks() {
       controller.die();
       if (localBodyAvatar) localBodyAvatar.root.visible = false;
       deathOverlay.style.display = 'flex';
+      // Show killer name
+      const killerNameEl = document.getElementById('killer-name');
+      if (killerNameEl) {
+        killerNameEl.textContent = data.killerName || data.killerId?.slice(0, 6) || '?';
+      }
       startRespawnCountdown(data.respawnIn || 3);
       if (scores.has(data.killerId)) scores.get(data.killerId).kills++;
       if (scores.has(net.localId))   scores.get(net.localId).deaths++;
@@ -1120,6 +1125,8 @@ function setupNetworkCallbacks() {
       deathOverlay.style.display = 'none';
       if (localBodyAvatar && isThirdPerson) localBodyAvatar.root.visible = true;
       updateHealthUI();
+      // Refill ammo on respawn
+      if (weapon) weapon.refillAmmo();
     } else {
       const rp = remotePlayers.get(data.id);
       if (rp) {

@@ -446,6 +446,19 @@ body {
   animation: pulseRed 1s ease infinite alternate;
 }
 
+#death-killer {
+  font-size: 24px;
+  color: rgba(255, 255, 255, 0.9);
+  margin-top: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+#killer-name {
+  color: #ff8844;
+  font-weight: 700;
+}
+
 #respawn-timer {
   margin-top: 20px;
   font-size: 18px;
