@@ -122,6 +122,7 @@ let sessionToken      = null;
 let sessionUsername   = null;
 let sessionTotalKills = 0;
 let isGameStarted     = false;
+let openingMenu       = false; // Flag to prevent lock screen from showing when opening menu
 
 // ── Game objects (lazy-initialized after auth) ─────────────────────────────────
 let renderer, scene, camera, clock;
@@ -848,8 +849,17 @@ function setupMenuButtons() {
   if (lockMenuBtn) {
     lockMenuBtn.addEventListener('click', (e) => {
       e.stopPropagation();
+      // Set flag to prevent lock screen from showing
+      openingMenu = true;
+      // Unlock pointer if locked
+      if (document.pointerLockElement) {
+        document.exitPointerLock();
+      }
       accountMenu.style.display = 'flex';
       lockScreen.style.display = 'none';
+      settingsModal.style.display = 'none';
+      // Reset flag after a short delay
+      setTimeout(() => { openingMenu = false; }, 100);
     });
   }
 
@@ -857,9 +867,9 @@ function setupMenuButtons() {
   const weaponArBtn = document.getElementById('weapon-ar-btn');
   const weaponSniperBtn = document.getElementById('weapon-sniper-btn');
 
-  if (weaponArBtn && weapon) {
+  if (weaponArBtn) {
     weaponArBtn.addEventListener('click', () => {
-      weapon.switchWeapon('ar');
+      if (weapon) weapon.switchWeapon('ar');
       weaponArBtn.classList.add('active');
       weaponSniperBtn.classList.remove('active');
       const gunsModal = document.getElementById('guns-modal');
@@ -868,9 +878,9 @@ function setupMenuButtons() {
     });
   }
 
-  if (weaponSniperBtn && weapon) {
+  if (weaponSniperBtn) {
     weaponSniperBtn.addEventListener('click', () => {
-      weapon.switchWeapon('sniper');
+      if (weapon) weapon.switchWeapon('sniper');
       weaponSniperBtn.classList.add('active');
       weaponArBtn.classList.remove('active');
       const gunsModal = document.getElementById('guns-modal');
@@ -926,9 +936,15 @@ function setupInput() {
 
   document.addEventListener('pointerlockchange', () => {
     if (!document.pointerLockElement && !isDead) {
-      if (settingsModal.style.display !== 'flex' && accountMenu.style.display !== 'flex') {
-        lockScreen.style.display = 'flex';
-      }
+      // Don't show lock screen if we're opening the menu
+      if (openingMenu) return;
+      // Only show lock screen if neither menu nor settings are open
+      // Use a small delay to allow menu to open first
+      setTimeout(() => {
+        if (settingsModal.style.display !== 'flex' && accountMenu.style.display !== 'flex') {
+          lockScreen.style.display = 'flex';
+        }
+      }, 50);
     }
   });
 
