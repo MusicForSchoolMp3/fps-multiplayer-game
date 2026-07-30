@@ -33,12 +33,14 @@ body {
 
 #auth-card {
   width: 400px;
+  max-height: 90vh;
   background: rgba(255,255,255,0.03);
   border: 1px solid rgba(255,255,255,0.09);
   border-radius: 14px;
   padding: 40px 44px 44px;
   backdrop-filter: blur(24px);
   box-shadow: 0 30px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04) inset;
+  overflow-y: auto;
 }
 
 #auth-logo {
@@ -640,6 +642,7 @@ body {
 
 #menu-card {
   width: 440px;
+  max-height: 90vh;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 16px;
@@ -649,6 +652,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 24px;
+  overflow-y: auto;
 }
 
 .menu-header {

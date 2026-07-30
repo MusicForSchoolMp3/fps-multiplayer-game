@@ -812,11 +812,25 @@ function setupMenuButtons() {
     });
   }
 
+  // Account Menu Guns Button
+  if (menuGunsBtn) {
+    menuGunsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      accountMenu.style.display = 'none';
+      openGunsModal();
+    });
+  }
+
   // Account Menu Settings Button
   if (menuSettingsBtn) {
     menuSettingsBtn.addEventListener('click', (e) => {
       e.stopPropagation();
+      accountMenu.style.display = 'none';
       settingsModal.style.display = 'flex';
+      // Change resume button text when not in game
+      if (settingsResumeBtn) {
+        settingsResumeBtn.textContent = 'BACK TO MENU';
+      }
     });
   }
 
@@ -868,6 +882,8 @@ function setupInput() {
     settingsModal.style.display = 'none';
     if (isGameStarted && controller && !isDead) {
       controller.lock();
+    } else {
+      accountMenu.style.display = 'flex';
     }
   };
 
@@ -879,6 +895,7 @@ function setupInput() {
   const gunsModal = document.getElementById('guns-modal');
   const gunsCloseBtn = document.getElementById('guns-close-btn');
   const settingsGunsBtn = document.getElementById('settings-guns-btn');
+  const menuGunsBtn = document.getElementById('menu-guns-btn');
 
   const openGunsModal = () => {
     gunsModal.style.display = 'flex';
@@ -886,9 +903,13 @@ function setupInput() {
 
   const closeGunsModal = () => {
     gunsModal.style.display = 'none';
+    if (!isGameStarted) {
+      accountMenu.style.display = 'flex';
+    }
   };
 
   if (settingsGunsBtn) settingsGunsBtn.addEventListener('click', openGunsModal);
+  if (menuGunsBtn) menuGunsBtn.addEventListener('click', openGunsModal);
   if (gunsCloseBtn) gunsCloseBtn.addEventListener('click', closeGunsModal);
 
   // Settings: Head Bob Toggle
