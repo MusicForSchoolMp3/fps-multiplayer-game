@@ -82,6 +82,7 @@ function createPlayer(socket, username) {
     deaths: 0,
     isDead: false,
     lastSeen: Date.now(),
+    currentWeapon: 'ar',
   };
 }
 
@@ -97,6 +98,7 @@ function sanitize(p) {
     username: p.username,
     colorIndex: p.colorIndex,
     isDead: p.isDead,
+    currentWeapon: p.currentWeapon || 'ar',
   };
 }
 
@@ -153,6 +155,7 @@ app.post('/api/register', async (req, res) => {
       username: username.toLowerCase(),
       passwordHash,
       totalKills: 0,
+      skins: ['ar_default', 'sniper_midnight'], // Default skins
       createdAt: new Date(),
     });
 
@@ -201,6 +204,7 @@ app.post('/api/login', async (req, res) => {
       uid: account._id.toString(),
       username: account.username,
       totalKills: account.totalKills || 0,
+      skins: account.skins || ['ar_default', 'sniper_midnight'],
       token
     });
   } catch (error) {
@@ -229,7 +233,8 @@ app.get('/api/me', async (req, res) => {
     res.json({
       uid: account._id.toString(),
       username: account.username,
-      totalKills: account.totalKills || 0
+      totalKills: account.totalKills || 0,
+      skins: account.skins || ['ar_default', 'sniper_midnight']
     });
   } catch (error) {
     if (error.name === 'JsonWebTokenError') {
@@ -240,6 +245,42 @@ app.get('/api/me', async (req, res) => {
     }
     console.error('Get account error:', error);
     res.status(500).json({ error: 'Failed to get account' });
+  }
+});
+
+app.post('/api/validate-skin', async (req, res) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  const { skinId } = req.body || {};
+  
+  if (!token) return res.status(401).json({ error: 'Missing token' });
+  if (!skinId) return res.status(400).json({ error: 'Missing skinId' });
+
+  try {
+    // Verify JWT token
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    if (!accountsCollection) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    const account = await accountsCollection.findOne({ username: decoded.username });
+    if (!account) {
+      return res.status(401).json({ error: 'Account not found' });
+    }
+
+    const ownedSkins = account.skins || ['ar_default', 'sniper_midnight'];
+    const ownsSkin = ownedSkins.includes(skinId);
+
+    res.json({ ownsSkin, ownedSkins });
+  } catch (error) {
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Token expired' });
+    }
+    console.error('Validate skin error:', error);
+    res.status(500).json({ error: 'Failed to validate skin' });
   }
 });
 
@@ -275,6 +316,27 @@ io.on('connection', async (socket) => {
     console.log(`[-] Rejected connection: missing token (${socket.id})`);
     socket.disconnect();
     return;
+  }
+
+  // Check for duplicate account connections
+  for (const [existingId, existingPlayer] of players) {
+    if (existingPlayer.username === username) {
+      console.log(`[!] Duplicate connection detected for ${username} - kicking both`);
+      
+      // Kick the existing connection
+      io.to(existingId).emit('duplicate_login', {
+        message: 'You have been logged in from another location'
+      });
+      players.delete(existingId);
+      io.sockets.sockets.get(existingId)?.disconnect();
+      
+      // Kick the new connection
+      socket.emit('duplicate_login', {
+        message: 'You are already logged in from another location'
+      });
+      socket.disconnect();
+      return;
+    }
   }
 
   const player = createPlayer(socket, username);
@@ -358,6 +420,20 @@ io.on('connection', async (socket) => {
     });
   });
 
+  socket.on('weapon_change', (data) => {
+    const p = players.get(socket.id);
+    if (!p) return;
+    
+    // Store current weapon for this player
+    p.currentWeapon = data.weapon || 'ar';
+    
+    // Broadcast to other players
+    socket.broadcast.emit('player_weapon_change', {
+      id: socket.id,
+      weapon: p.currentWeapon
+    });
+  });
+
   socket.on('disconnect', () => {
     players.delete(socket.id);
     io.emit('player_leave', socket.id);
@@ -421,6 +497,7 @@ setInterval(() => {
       speed: p.speed, isGrounded: p.isGrounded,
       health: p.health, isDead: p.isDead,
       username: p.username,
+      currentWeapon: p.currentWeapon || 'ar',
     };
   }
   io.emit('world_state', state);

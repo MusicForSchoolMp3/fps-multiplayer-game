@@ -101,6 +101,11 @@ export class WeaponSystem {
     this._reloadTimer = 0;
     this._updateVisualWeapon();
     this._updateUI();
+    
+    // Send weapon change to network so other players can see it
+    if (this.net && this.net.socket) {
+      this.net.socket.emit('weapon_change', { weapon: weaponKey });
+    }
   }
 
   addAmmo(amount) {

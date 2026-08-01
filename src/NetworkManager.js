@@ -26,6 +26,8 @@ export class NetworkManager {
     this.onRespawn     = null; // (data) => {}
     this.onHealthSync  = null; // (id, health) => {}
     this.onChatMessage = null; // (data) => {}
+    this.onPlayerWeaponChange = null; // (id, weapon) => {}
+    this.onDuplicateLogin = null; // (message) => {}
 
     this._setupEvents();
 
@@ -100,6 +102,14 @@ export class NetworkManager {
 
     this.socket.on('chat_message', (data) => {
       if (this.onChatMessage) this.onChatMessage(data);
+    });
+
+    this.socket.on('player_weapon_change', (data) => {
+      if (this.onPlayerWeaponChange) this.onPlayerWeaponChange(data.id, data.weapon);
+    });
+
+    this.socket.on('duplicate_login', (data) => {
+      if (this.onDuplicateLogin) this.onDuplicateLogin(data.message);
     });
   }
 

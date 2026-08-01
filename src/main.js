@@ -12,6 +12,7 @@ import {
   buildFPHands,
   animateAvatar,
   createUsernameLabel,
+  setWeaponType,
 } from './AvatarManager.js';
 import {
   MenuAvatarPreview,
@@ -128,6 +129,7 @@ const registerBtn     = document.getElementById('register-btn');
 let sessionToken      = null;
 let sessionUsername   = null;
 let sessionTotalKills = 0;
+let ownedSkins        = ['ar_default', 'sniper_midnight']; // Default skins
 let isGameStarted     = false;
 let openingMenu       = false; // Flag to prevent lock screen from showing when opening menu
 
@@ -184,6 +186,7 @@ async function checkSession() {
     sessionToken = token;
     sessionUsername = data.username;
     sessionTotalKills = data.totalKills || 0;
+    ownedSkins = data.skins || ['ar_default', 'sniper_midnight'];
     return true;
   } catch (error) {
     console.error('Session check error:', error);
@@ -192,10 +195,11 @@ async function checkSession() {
   }
 }
 
-function saveSession(token, username, totalKills = 0) {
+function saveSession(token, username, totalKills = 0, skins = null) {
   sessionToken = token;
   sessionUsername = username;
   sessionTotalKills = totalKills;
+  ownedSkins = skins || ['ar_default', 'sniper_midnight'];
   // Persist JWT token to localStorage
   localStorage.setItem('jwt_token', token);
 }
@@ -276,7 +280,7 @@ function setupAuthUI() {
       if (!res.ok) {
         throw new Error(data.error || 'Login failed');
       }
-      saveSession(data.token, data.username, data.totalKills || 0);
+      saveSession(data.token, data.username, data.totalKills || 0, data.skins || null);
       hideAuth();
       showAccountMenu();
     } catch (error) {
@@ -1015,6 +1019,7 @@ function setupCharacterPreviewAndSkins() {
     skins.forEach((skin) => {
       const isEquipped = skin.id === equipped;
       const isPlaceholder = skin.type === 'placeholder';
+      const isOwned = ownedSkins.includes(skin.id);
 
       const card = document.createElement('div');
       card.className = 'skin-card' + (isEquipped ? ' equipped' : '');
@@ -1028,6 +1033,7 @@ function setupCharacterPreviewAndSkins() {
       else if (skin.badge === 'COMING SOON') badgeClass = 'badge-coming';
       else if (skin.badge === 'CLASSIC')     badgeClass = 'badge-classic';
       else if (skin.type === 'glb')          badgeClass = 'badge-glb';
+      else if (!isOwned)         { badgeClass = 'badge-locked'; badgeText = 'LOCKED'; }
 
       const icon = weaponType === 'sniper' ? '🎯' : '🔫';
 
@@ -1040,7 +1046,7 @@ function setupCharacterPreviewAndSkins() {
         <div class="skin-card-badge ${badgeClass}">${badgeText}</div>
       `;
 
-      if (!isPlaceholder) {
+      if (!isPlaceholder && isOwned) {
         card.addEventListener('click', () => {
           // Deselect all
           list.querySelectorAll('.skin-card').forEach(c => c.classList.remove('selected'));
@@ -1057,8 +1063,8 @@ function setupCharacterPreviewAndSkins() {
           skinPreviewer?.showWeapon(weaponType);
         });
       } else {
-        card.style.opacity = '0.45';
-        card.style.cursor = 'not-allowed';
+        card.style.opacity = isOwned ? '1' : '0.45';
+        card.style.cursor = isOwned ? 'pointer' : 'not-allowed';
       }
 
       list.appendChild(card);
@@ -1402,6 +1408,18 @@ function setupNetworkCallbacks() {
   net.onHealthSync = (id, health) => {
     if (id === net.localId) { localHealth = health; updateHealthUI(); }
   };
+
+  net.onPlayerWeaponChange = (id, weapon) => {
+    const rp = remotePlayers.get(id);
+    if (rp && rp.root) {
+      setWeaponType(rp.root, weapon);
+    }
+  };
+
+  net.onDuplicateLogin = (message) => {
+    alert(message || 'You have been logged in from another location');
+    signOut();
+  };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1413,6 +1431,11 @@ function spawnRemotePlayer(id, data) {
   const colorIdx = data.colorIndex || 0;
   const { root, joints } = buildHumanoid(colorIdx, false);
   root.position.set(data.x || 0, 0, data.z || 0);
+  
+  // Set initial weapon type
+  if (data.currentWeapon) {
+    setWeaponType(root, data.currentWeapon);
+  }
 
   // Username label above head
   const uname = data.username || data.name || id.slice(0, 6);
