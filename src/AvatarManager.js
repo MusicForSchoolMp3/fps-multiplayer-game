@@ -9,6 +9,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 // ── Sniper GLB Model Preloader ────────────────────────────────────────────────
 let sniperGlbTemplate = null;
 const sniperCallbacks = [];
+const sniperModelGroups = []; // Registry of sniper-model groups waiting for GLB
 
 export function loadSniperModel(onLoad) {
   if (sniperGlbTemplate) {
@@ -64,6 +65,14 @@ export function loadSniperModel(onLoad) {
 
       sniperCallbacks.forEach(cb => cb(sniperGlbTemplate.clone()));
       sniperCallbacks.length = 0;
+
+      // Update all registered sniper-model groups
+      sniperModelGroups.forEach(group => {
+        if (group.children.length === 0) {
+          group.add(sniperGlbTemplate.clone());
+        }
+      });
+      sniperModelGroups.length = 0;
     },
     undefined,
     (err) => {
@@ -302,13 +311,13 @@ export function buildWeaponContainer() {
   sniperGroup.position.set(0, 0, -0.05);
   container.add(sniperGroup);
 
-  // Populate sniper model when loaded
-  loadSniperModel((model) => {
-    while (sniperGroup.children.length > 0) {
-      sniperGroup.remove(sniperGroup.children[0]);
-    }
-    sniperGroup.add(model);
-  });
+  // If GLB template is already loaded, add it immediately
+  if (sniperGlbTemplate) {
+    sniperGroup.add(sniperGlbTemplate.clone());
+  } else {
+    // Register this group to be updated when GLB loads
+    sniperModelGroups.push(sniperGroup);
+  }
 
   return container;
 }

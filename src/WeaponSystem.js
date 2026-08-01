@@ -170,6 +170,13 @@ export class WeaponSystem {
       this.fpHandsGroup.position.x = THREE.MathUtils.lerp(0, -0.04, this.zoomProgress);
       this.fpHandsGroup.position.y = THREE.MathUtils.lerp(0, 0.16, this.zoomProgress);
       this.fpHandsGroup.position.z = THREE.MathUtils.lerp(0, 0.12, this.zoomProgress);
+      
+      // Hide weapon when zoom animation completes to avoid blocking view
+      if (this.currentWeapon === 'sniper' && this.zoomProgress > 0.9) {
+        this.fpHandsGroup.visible = false;
+      } else {
+        this.fpHandsGroup.visible = true;
+      }
     }
 
     // Slow down turn sensitivity when zoomed
