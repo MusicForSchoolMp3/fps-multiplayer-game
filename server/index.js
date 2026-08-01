@@ -34,6 +34,15 @@ async function connectToMongo() {
 
     // Create case-insensitive index on username for faster lookups
     await accountsCollection.createIndex({ username: 1 }, { unique: true, collation: { locale: 'en', strength: 2 } });
+
+    // Migration: Add skins field to existing accounts that don't have it
+    const result = await accountsCollection.updateMany(
+      { skins: { $exists: false } },
+      { $set: { skins: ['ar_default', 'sniper_midnight'] } }
+    );
+    if (result.modifiedCount > 0) {
+      console.log(`Migrated ${result.modifiedCount} accounts with default skins`);
+    }
   } catch (error) {
     console.error('MongoDB connection error:', error);
     console.log('Running without database - accounts will not persist');
