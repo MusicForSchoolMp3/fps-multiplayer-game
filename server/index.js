@@ -36,12 +36,14 @@ async function connectToMongo() {
     await accountsCollection.createIndex({ username: 1 }, { unique: true, collation: { locale: 'en', strength: 2 } });
 
     // Migration: Add skins field to existing accounts that don't have it
-    const result = await accountsCollection.updateMany(
-      { skins: { $exists: false } },
-      { $set: { skins: ['ar_default', 'sniper_midnight'] } }
-    );
-    if (result.modifiedCount > 0) {
-      console.log(`Migrated ${result.modifiedCount} accounts with default skins`);
+    try {
+      const result = await accountsCollection.updateMany(
+        { skins: { $exists: false } },
+        { $set: { skins: ['ar_default', 'sniper_midnight'] } }
+      );
+      console.log(`Skin migration: matched ${result.matchedCount}, modified ${result.modifiedCount} accounts`);
+    } catch (migrationError) {
+      console.error('Skin migration error:', migrationError);
     }
   } catch (error) {
     console.error('MongoDB connection error:', error);
