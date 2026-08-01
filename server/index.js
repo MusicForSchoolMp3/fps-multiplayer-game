@@ -35,13 +35,28 @@ async function connectToMongo() {
     // Create case-insensitive index on username for faster lookups
     await accountsCollection.createIndex({ username: 1 }, { unique: true, collation: { locale: 'en', strength: 2 } });
 
+    // Wait a moment for collection to be fully ready
+    await new Promise(resolve => setTimeout(resolve, 500));
+
     // Migration: Add skins field to existing accounts that don't have it
     try {
-      const result = await accountsCollection.updateMany(
-        { skins: { $exists: false } },
-        { $set: { skins: ['ar_default', 'sniper_midnight'] } }
-      );
-      console.log(`Skin migration: matched ${result.matchedCount}, modified ${result.modifiedCount} accounts`);
+      // First, count total accounts
+      const totalCount = await accountsCollection.countDocuments();
+      console.log(`Total accounts in database: ${totalCount}`);
+
+      // Count accounts without skins
+      const withoutSkins = await accountsCollection.countDocuments({ skins: { $exists: false } });
+      console.log(`Accounts without skins field: ${withoutSkins}`);
+
+      if (withoutSkins > 0) {
+        const result = await accountsCollection.updateMany(
+          { skins: { $exists: false } },
+          { $set: { skins: ['ar_default', 'sniper_midnight'] } }
+        );
+        console.log(`Skin migration: matched ${result.matchedCount}, modified ${result.modifiedCount} accounts`);
+      } else {
+        console.log('All accounts already have skins field');
+      }
     } catch (migrationError) {
       console.error('Skin migration error:', migrationError);
     }
