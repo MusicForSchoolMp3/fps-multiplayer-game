@@ -742,6 +742,7 @@ function startGame() {
     () => isThirdPerson, 
     () => localBodyAvatar
   );
+  weapon.setFPHandsGroup(fpHandsGroup);
   weapon.remotePlayers = remotePlayers;
   weapon.setMapMeshes(mapMeshes);
 
@@ -952,6 +953,20 @@ function setupInput() {
   document.addEventListener('keydown', (e) => {
     if (e.code === 'Tab') { e.preventDefault(); scoreboard.style.display = 'block'; }
     if (e.code === 'KeyV') toggleThirdPerson();
+    if (e.code === 'Digit1') {
+      if (weapon) weapon.switchWeapon('ar');
+      const weaponArBtn = document.getElementById('weapon-ar-btn');
+      const weaponSniperBtn = document.getElementById('weapon-sniper-btn');
+      if (weaponArBtn) weaponArBtn.classList.add('active');
+      if (weaponSniperBtn) weaponSniperBtn.classList.remove('active');
+    }
+    if (e.code === 'Digit2') {
+      if (weapon) weapon.switchWeapon('sniper');
+      const weaponArBtn = document.getElementById('weapon-ar-btn');
+      const weaponSniperBtn = document.getElementById('weapon-sniper-btn');
+      if (weaponSniperBtn) weaponSniperBtn.classList.add('active');
+      if (weaponArBtn) weaponArBtn.classList.remove('active');
+    }
     if (e.code === 'Slash') {
       e.preventDefault();
       toggleChat();

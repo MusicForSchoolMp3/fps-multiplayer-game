@@ -2,6 +2,7 @@
 // Manages local player weapon: ammo, reload, shoot raycasting, UI update.
 
 import * as THREE from 'three';
+import { setWeaponType } from './AvatarManager.js';
 
 // Weapon configurations
 const WEAPONS = {
@@ -34,6 +35,7 @@ export class WeaponSystem {
     this.ui         = ui;
     this.isThirdPersonRef = isThirdPersonRef;
     this.localBodyAvatarRef = localBodyAvatarRef;
+    this.fpHandsGroup = null;
 
     // Current weapon
     this.currentWeapon = 'ar';
@@ -63,6 +65,23 @@ export class WeaponSystem {
     this._updateUI();
   }
 
+  setFPHandsGroup(fpHandsGroup) {
+    this.fpHandsGroup = fpHandsGroup;
+    this._updateVisualWeapon();
+  }
+
+  _updateVisualWeapon() {
+    if (this.fpHandsGroup) {
+      setWeaponType(this.fpHandsGroup, this.currentWeapon);
+    }
+    if (this.localBodyAvatarRef) {
+      const avatar = this.localBodyAvatarRef();
+      if (avatar && avatar.root) {
+        setWeaponType(avatar.root, this.currentWeapon);
+      }
+    }
+  }
+
   _loadWeapon(weaponKey) {
     const config = WEAPONS[weaponKey];
     this.ammo = config.maxAmmo;
@@ -74,11 +93,13 @@ export class WeaponSystem {
   }
 
   switchWeapon(weaponKey) {
-    if (this.currentWeapon === weaponKey) return;
+    if (this.currentWeapon === weaponKey && this._weaponInitialized) return;
     this.currentWeapon = weaponKey;
+    this._weaponInitialized = true;
     this._loadWeapon(weaponKey);
     this.isReloading = false;
     this._reloadTimer = 0;
+    this._updateVisualWeapon();
     this._updateUI();
   }
 

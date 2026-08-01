@@ -4,6 +4,88 @@
 // Remote players: full body renders with joint animation.
 
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+// ── Sniper GLB Model Preloader ────────────────────────────────────────────────
+let sniperGlbTemplate = null;
+const sniperCallbacks = [];
+
+export function loadSniperModel(onLoad) {
+  if (sniperGlbTemplate) {
+    if (onLoad) onLoad(sniperGlbTemplate.clone());
+    return;
+  }
+  if (onLoad) sniperCallbacks.push(onLoad);
+
+  if (loadSniperModel.isLoading) return;
+  loadSniperModel.isLoading = true;
+
+  const loader = new GLTFLoader();
+  const url = '/sniper skins GLB/Meshy_AI_Midnight_Precision_Ri_0801152731_generate.glb';
+
+  loader.load(
+    url,
+    (gltf) => {
+      const model = gltf.scene;
+
+      const box3 = new THREE.Box3().setFromObject(model);
+      const center = box3.getCenter(new THREE.Vector3());
+      const size = box3.getSize(new THREE.Vector3());
+
+      const pivot = new THREE.Group();
+      pivot.name = 'sniper-glb-pivot';
+
+      const sniperMat = new THREE.MeshStandardMaterial({
+        color: 0x1a1e24,
+        metalness: 0.85,
+        roughness: 0.25,
+      });
+
+      model.traverse((child) => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+          child.material = sniperMat;
+        }
+      });
+
+      model.position.sub(center);
+
+      // Rotate GLB mesh so long axis (+X) points forward (-Z)
+      model.rotation.y = -Math.PI / 2;
+
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const targetLength = 0.95;
+      const scale = targetLength / (maxDim || 1);
+      pivot.scale.set(scale, scale, scale);
+
+      pivot.add(model);
+      sniperGlbTemplate = pivot;
+
+      sniperCallbacks.forEach(cb => cb(sniperGlbTemplate.clone()));
+      sniperCallbacks.length = 0;
+    },
+    undefined,
+    (err) => {
+      console.error('Failed to load GLB sniper model:', err);
+    }
+  );
+}
+
+// Trigger early preload
+loadSniperModel();
+
+export function setWeaponType(container, type) {
+  if (!container) return;
+  container.traverse((obj) => {
+    if (obj.name === 'ar-model') {
+      obj.visible = (type === 'ar');
+    }
+    if (obj.name === 'sniper-model') {
+      obj.visible = (type === 'sniper');
+    }
+  });
+}
 
 // ── Shared geometry / material cache ─────────────────────────────────────────
 const GEO_CACHE = {};
@@ -140,7 +222,7 @@ export function buildHumanoid(colorIndex = 0, isLocal = false) {
   const legL = makeLeg('L');
 
   // ── Weapon ────────────────────────────────────────────────────────────────
-  const weaponGroup = buildWeapon();
+  const weaponGroup = buildWeaponContainer();
   weaponGroup.name = 'weapon';
 
   // Attach weapon to right hand
@@ -204,6 +286,33 @@ export function buildWeapon() {
   return group;
 }
 
+export function buildWeaponContainer() {
+  const container = new THREE.Group();
+  container.name = 'weapon-container';
+
+  // 1. AR model (procedural)
+  const arGroup = buildWeapon();
+  arGroup.name = 'ar-model';
+  container.add(arGroup);
+
+  // 2. Sniper model (GLB)
+  const sniperGroup = new THREE.Group();
+  sniperGroup.name = 'sniper-model';
+  sniperGroup.visible = false;
+  sniperGroup.position.set(0, 0, -0.05);
+  container.add(sniperGroup);
+
+  // Populate sniper model when loaded
+  loadSniperModel((model) => {
+    while (sniperGroup.children.length > 0) {
+      sniperGroup.remove(sniperGroup.children[0]);
+    }
+    sniperGroup.add(model);
+  });
+
+  return container;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Build first-person hands + weapon (visible only to local player)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -233,7 +342,7 @@ export function buildFPHands() {
   group.add(handL);
 
   // Weapon
-  const weapon = buildWeapon();
+  const weapon = buildWeaponContainer();
   weapon.position.set(0.04, -0.26, -0.52);
   weapon.rotation.set(0.05, 0, 0);
   group.add(weapon);
