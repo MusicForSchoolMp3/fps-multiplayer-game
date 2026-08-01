@@ -63,6 +63,16 @@
 
   <!-- ─── Account Main Menu ─────────────────────────────────────────────────── -->
   <div id="account-menu" style="display:none;">
+
+    <!-- ── LEFT SIDE: Character Preview Panel ─────────────────────────────── -->
+    <div id="menu-character-panel">
+      <div class="char-panel-label">YOUR CHARACTER</div>
+      <canvas id="menu-avatar-canvas"></canvas>
+      <div class="char-panel-weapon-tag" id="char-weapon-tag">AR</div>
+      <button id="menu-loadout-btn" class="loadout-btn">🎨 SKINS</button>
+    </div>
+
+    <!-- ── CENTER: Main Menu Card ─────────────────────────────────────────── -->
     <div id="menu-card">
       <div class="menu-header">
         <div id="menu-logo">
@@ -104,7 +114,7 @@
       </div>
     </div>
 
-    <!-- Side Settings Panel -->
+    <!-- ── RIGHT SIDE: Settings Panel ─────────────────────────────────────── -->
     <div id="menu-side-settings">
       <div class="side-settings-header">⚙ SETTINGS</div>
       <div class="side-settings-content">
@@ -118,6 +128,46 @@
             <span class="toggle-slider"></span>
           </label>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Skins Manager Modal ──────────────────────────────────────────────── -->
+  <div id="skins-modal" style="display:none;">
+    <div id="skins-backdrop"></div>
+    <div id="skins-panel">
+
+      <!-- Header -->
+      <div id="skins-header">
+        <div id="skins-title">🎨 LOADOUT &amp; SKINS</div>
+        <button id="skins-close-btn" class="skins-close">✕</button>
+      </div>
+
+      <!-- Gun Tabs -->
+      <div id="skins-weapon-tabs">
+        <button class="skins-tab active" data-weapon="ar" id="skins-tab-ar">🔫 AR</button>
+        <button class="skins-tab" data-weapon="sniper" id="skins-tab-sniper">🎯 SNIPER</button>
+      </div>
+
+      <!-- Content area -->
+      <div id="skins-content">
+
+        <!-- Left: Rotating 3D weapon preview -->
+        <div id="skins-preview-col">
+          <div id="skins-preview-wrapper">
+            <canvas id="skins-preview-canvas"></canvas>
+            <div id="skins-preview-glow"></div>
+          </div>
+          <div id="skins-preview-name">Default</div>
+          <div id="skins-preview-desc">Select a skin to preview it here.</div>
+        </div>
+
+        <!-- Right: Skin cards list -->
+        <div id="skins-list-col">
+          <div id="skins-list"><!-- populated by JS --></div>
+          <button id="skins-equip-btn" class="menu-btn primary-btn">✔ EQUIP SKIN</button>
+        </div>
+
       </div>
     </div>
   </div>

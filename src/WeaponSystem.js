@@ -153,25 +153,37 @@ export class WeaponSystem {
       this._shoot();
     }
 
-    // Sniper zoom on right-click hold
-    if (this.currentWeapon === 'sniper' && isLocked) {
-      const targetFov = this._rightMouseDown ? 20 : this.baseFov;
-      this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 10 * delta);
+    // Sniper zoom on right-click hold (Aim Down Sights animation)
+    const isZooming = (this.currentWeapon === 'sniper' && isLocked && this._rightMouseDown);
+    const targetZoom = isZooming ? 1.0 : 0.0;
+    this.zoomProgress = THREE.MathUtils.lerp(this.zoomProgress || 0, targetZoom, 12 * delta);
+
+    // FOV transition based on zoomProgress
+    const targetFov = THREE.MathUtils.lerp(this.baseFov, 20, this.zoomProgress);
+    if (Math.abs(this.camera.fov - targetFov) > 0.01) {
+      this.camera.fov = targetFov;
       this.camera.updateProjectionMatrix();
+    }
 
-      // Slow down turn sensitivity when zoomed
-      if (this.controller) {
-        this.controller.zoomSensitivityMultiplier = this._rightMouseDown ? 0.3 : 1.0;
-      }
+    // Hands ADS lift animation (moves sniper UP to eye)
+    if (this.fpHandsGroup) {
+      this.fpHandsGroup.position.x = THREE.MathUtils.lerp(0, -0.04, this.zoomProgress);
+      this.fpHandsGroup.position.y = THREE.MathUtils.lerp(0, 0.16, this.zoomProgress);
+      this.fpHandsGroup.position.z = THREE.MathUtils.lerp(0, 0.12, this.zoomProgress);
+    }
 
-      // Toggle vignette
-      const vignette = document.getElementById('sniper-vignette');
-      if (vignette) {
-        if (this._rightMouseDown) {
-          vignette.classList.add('active');
-        } else {
-          vignette.classList.remove('active');
-        }
+    // Slow down turn sensitivity when zoomed
+    if (this.controller) {
+      this.controller.zoomSensitivityMultiplier = isZooming ? 0.3 : 1.0;
+    }
+
+    // Toggle vignette dark circle when scope reaches eye
+    const vignette = document.getElementById('sniper-vignette');
+    if (vignette) {
+      if (this.zoomProgress > 0.75 && isZooming) {
+        vignette.classList.add('active');
+      } else {
+        vignette.classList.remove('active');
       }
     }
 

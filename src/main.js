@@ -13,6 +13,13 @@ import {
   animateAvatar,
   createUsernameLabel,
 } from './AvatarManager.js';
+import {
+  MenuAvatarPreview,
+  SkinPreviewer,
+  SKINS_CONFIG,
+  getEquippedSkin,
+  setEquippedSkin,
+} from './SkinManager.js';
 import './style.css';
 import {
   auth,
@@ -899,7 +906,189 @@ function setupMenuButtons() {
       if (!isGameStarted) accountMenu.style.display = 'flex';
     });
   }
+
+  // ── Character Preview + Skins Manager ─────────────────────────────────────
+  setupCharacterPreviewAndSkins();
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Character preview + Skins modal logic
+// ─────────────────────────────────────────────────────────────────────────────
+let menuAvatarPreview = null;
+let skinPreviewer     = null;
+let skinsCurrentWeapon = 'ar';
+let skinsSelectedSkinId = null;
+
+function setupCharacterPreviewAndSkins() {
+  // ── 3D Character Preview (left panel) ──────────────────────────────────────
+  const avatarCanvas = document.getElementById('menu-avatar-canvas');
+  if (avatarCanvas) {
+    menuAvatarPreview = new MenuAvatarPreview(avatarCanvas);
+    menuAvatarPreview.start();
+  }
+
+  // Keep weapon tag in sync with current weapon
+  function updateCharPanelTag() {
+    const tag = document.getElementById('char-weapon-tag');
+    if (tag && menuAvatarPreview) {
+      // We show whatever the weapon system says, or 'AR' before game starts
+      const wName = weapon ? weapon.currentWeapon.toUpperCase() : 'AR';
+      tag.textContent = wName;
+      menuAvatarPreview.updateWeapon(weapon ? weapon.currentWeapon : 'ar');
+    }
+  }
+
+  // Patch weapon.switchWeapon to also update the preview
+  const _origSwitch = WeaponSystem.prototype.switchWeapon;
+  WeaponSystem.prototype.switchWeapon = function(key) {
+    _origSwitch.call(this, key);
+    updateCharPanelTag();
+  };
+
+  // Update immediately when menu opens
+  const accountMenuEl = document.getElementById('account-menu');
+  if (accountMenuEl) {
+    const menuObserver = new MutationObserver(() => {
+      if (accountMenuEl.style.display !== 'none') {
+        updateCharPanelTag();
+      }
+    });
+    menuObserver.observe(accountMenuEl, { attributes: true, attributeFilter: ['style'] });
+  }
+
+  // ── SKINS Button (on character panel) ──────────────────────────────────────
+  const loadoutBtn = document.getElementById('menu-loadout-btn');
+  const skinsModal = document.getElementById('skins-modal');
+  const skinsCloseBtn = document.getElementById('skins-close-btn');
+  const skinsBackdrop = document.getElementById('skins-backdrop');
+
+  function openSkinsModal() {
+    if (skinsModal) skinsModal.style.display = 'flex';
+    renderSkinsList(skinsCurrentWeapon);
+    if (!skinPreviewer) {
+      const previewCanvas = document.getElementById('skins-preview-canvas');
+      if (previewCanvas) {
+        skinPreviewer = new SkinPreviewer(previewCanvas);
+        skinPreviewer.start();
+      }
+    }
+    skinPreviewer?.showWeapon(skinsCurrentWeapon);
+  }
+
+  function closeSkinsModal() {
+    if (skinsModal) skinsModal.style.display = 'none';
+  }
+
+  if (loadoutBtn) loadoutBtn.addEventListener('click', openSkinsModal);
+  if (skinsCloseBtn) skinsCloseBtn.addEventListener('click', closeSkinsModal);
+  if (skinsBackdrop) skinsBackdrop.addEventListener('click', closeSkinsModal);
+
+  // ── Weapon tabs inside Skins Modal ─────────────────────────────────────────
+  const tabAr     = document.getElementById('skins-tab-ar');
+  const tabSniper = document.getElementById('skins-tab-sniper');
+
+  function setSkinsTab(weaponType) {
+    skinsCurrentWeapon = weaponType;
+    skinsSelectedSkinId = null;
+    tabAr?.classList.toggle('active', weaponType === 'ar');
+    tabSniper?.classList.toggle('active', weaponType === 'sniper');
+    renderSkinsList(weaponType);
+    skinPreviewer?.showWeapon(weaponType);
+    const previewName = document.getElementById('skins-preview-name');
+    const previewDesc = document.getElementById('skins-preview-desc');
+    if (previewName) previewName.textContent = weaponType === 'ar' ? 'AR Skins' : 'Sniper Skins';
+    if (previewDesc) previewDesc.textContent = 'Select a skin card to preview it here.';
+  }
+
+  if (tabAr)     tabAr.addEventListener('click',     () => setSkinsTab('ar'));
+  if (tabSniper) tabSniper.addEventListener('click', () => setSkinsTab('sniper'));
+
+  // ── Skin card rendering ─────────────────────────────────────────────────────
+  function renderSkinsList(weaponType) {
+    const list = document.getElementById('skins-list');
+    if (!list) return;
+    list.innerHTML = '';
+
+    const skins = SKINS_CONFIG[weaponType] || [];
+    const equipped = getEquippedSkin(weaponType);
+
+    skins.forEach((skin) => {
+      const isEquipped = skin.id === equipped;
+      const isPlaceholder = skin.type === 'placeholder';
+
+      const card = document.createElement('div');
+      card.className = 'skin-card' + (isEquipped ? ' equipped' : '');
+      card.dataset.skinId = skin.id;
+
+      // Badge class
+      let badgeClass = 'badge-default';
+      let badgeText = skin.badge || 'DEFAULT';
+      if (isEquipped)          { badgeClass = 'badge-equipped'; badgeText = 'EQUIPPED'; }
+      else if (skin.badge === 'FEATURED')    badgeClass = 'badge-featured';
+      else if (skin.badge === 'COMING SOON') badgeClass = 'badge-coming';
+      else if (skin.badge === 'CLASSIC')     badgeClass = 'badge-classic';
+      else if (skin.type === 'glb')          badgeClass = 'badge-glb';
+
+      const icon = weaponType === 'sniper' ? '🎯' : '🔫';
+
+      card.innerHTML = `
+        <div class="skin-card-icon" style="border-color:${skin.color}33; background: ${skin.color}14;">${icon}</div>
+        <div class="skin-card-info">
+          <div class="skin-card-name">${skin.name}</div>
+          <div class="skin-card-desc">${skin.desc}</div>
+        </div>
+        <div class="skin-card-badge ${badgeClass}">${badgeText}</div>
+      `;
+
+      if (!isPlaceholder) {
+        card.addEventListener('click', () => {
+          // Deselect all
+          list.querySelectorAll('.skin-card').forEach(c => c.classList.remove('selected'));
+          card.classList.add('selected');
+          skinsSelectedSkinId = skin.id;
+
+          // Update preview info
+          const previewName = document.getElementById('skins-preview-name');
+          const previewDesc = document.getElementById('skins-preview-desc');
+          if (previewName) previewName.textContent = skin.name;
+          if (previewDesc) previewDesc.textContent = skin.desc;
+
+          // Switch the 3D preview to show this weapon type
+          skinPreviewer?.showWeapon(weaponType);
+        });
+      } else {
+        card.style.opacity = '0.45';
+        card.style.cursor = 'not-allowed';
+      }
+
+      list.appendChild(card);
+    });
+  }
+
+  // ── Equip Button ─────────────────────────────────────────────────────────────
+  const equipBtn = document.getElementById('skins-equip-btn');
+  if (equipBtn) {
+    equipBtn.addEventListener('click', () => {
+      if (!skinsSelectedSkinId) return;
+      setEquippedSkin(skinsCurrentWeapon, skinsSelectedSkinId);
+      renderSkinsList(skinsCurrentWeapon);
+
+      // If game is running and this weapon is selected, re-apply visual
+      if (weapon && weapon.currentWeapon === skinsCurrentWeapon) {
+        weapon._updateVisualWeapon();
+      }
+
+      // Flash the equip button
+      equipBtn.textContent = '✔ EQUIPPED!';
+      equipBtn.style.background = 'linear-gradient(135deg, #22bb66 0%, #44dd88 100%)';
+      setTimeout(() => {
+        equipBtn.textContent = '✔ EQUIP SKIN';
+        equipBtn.style.background = '';
+      }, 1500);
+    });
+  }
+
+} // end setupCharacterPreviewAndSkins
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  INPUT SETUP & MENU CONTROLS
