@@ -1616,7 +1616,13 @@ function gameLoop() {
   }
 
   // ── Local controller ──────────────────────────────────────────────────────
-  if (!isDead) controller.update(delta);
+  if (!isDead) {
+    controller.update(delta);
+    // Debug: log controller state occasionally
+    if (Math.random() < 0.01) {
+      console.log('Controller update - isLocked:', controller.isLocked, 'velocity:', controller.velocity, 'position:', controller.position);
+    }
+  }
 
   // ── Update local body avatar (always, not just in third-person) ────────────
   if (localBodyAvatar && !isDead) {
