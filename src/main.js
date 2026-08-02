@@ -577,6 +577,16 @@ function startGame() {
     ammoModel = fbx;
     ammoModel.scale.set(0.05, 0.05, 0.05); // Increased scale
 
+    // Apply default material to override missing textures
+    const ammoMat = new THREE.MeshLambertMaterial({ color: 0xffaa00, emissive: 0xff4400, emissiveIntensity: 0.3 });
+    ammoModel.traverse((child) => {
+      if (child.isMesh) {
+        child.material = ammoMat;
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+
     ammoPositions.forEach((pos, index) => {
       const ammoInstance = ammoModel.clone();
       ammoInstance.position.set(pos.x, 1.5, pos.z);

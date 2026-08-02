@@ -135,19 +135,19 @@ function loadCharacter() {
 
 // ── Flexible Bone Finder for Mixamo Skeleton ─────────────────────────────────────
 const BONE_PATTERNS = {
-  hips: ['mixamorig:Hips', 'Hips', 'hip'],
-  spine: ['mixamorig:Spine', 'Spine', 'spine'],
-  head: ['mixamorig:Head', 'Head', 'head'],
-  rightArm: ['mixamorig:RightArm', 'RightArm', 'rightArm', 'right_arm'],
-  rightForeArm: ['mixamorig:RightForeArm', 'RightForeArm', 'rightForeArm', 'right_forearm'],
-  rightHand: ['mixamorig:RightHand', 'RightHand', 'rightHand', 'right_hand'],
-  leftArm: ['mixamorig:LeftArm', 'LeftArm', 'leftArm', 'left_arm'],
-  leftForeArm: ['mixamorig:LeftForeArm', 'LeftForeArm', 'leftForeArm', 'left_forearm'],
-  leftHand: ['mixamorig:LeftHand', 'LeftHand', 'leftHand', 'left_hand'],
-  rightUpLeg: ['mixamorig:RightUpLeg', 'RightUpLeg', 'rightUpLeg', 'right_up_leg'],
-  rightLeg: ['mixamorig:RightLeg', 'RightLeg', 'rightLeg', 'right_leg'],
-  leftUpLeg: ['mixamorig:LeftUpLeg', 'LeftUpLeg', 'leftUpLeg', 'left_up_leg'],
-  leftLeg: ['mixamorig:LeftLeg', 'LeftLeg', 'leftLeg', 'left_leg'],
+  hips: ['mixamorig1Hips', 'mixamorig:Hips', 'Hips', 'hip'],
+  spine: ['mixamorig1Spine', 'mixamorig:Spine', 'Spine', 'spine'],
+  head: ['mixamorig1Head', 'mixamorig:Head', 'Head', 'head'],
+  rightArm: ['mixamorig1RightArm', 'mixamorig:RightArm', 'RightArm', 'rightArm', 'right_arm'],
+  rightForeArm: ['mixamorig1RightForeArm', 'mixamorig:RightForeArm', 'RightForeArm', 'rightForeArm', 'right_forearm'],
+  rightHand: ['mixamorig1RightHand', 'mixamorig:RightHand', 'RightHand', 'rightHand', 'right_hand'],
+  leftArm: ['mixamorig1LeftArm', 'mixamorig:LeftArm', 'LeftArm', 'leftArm', 'left_arm'],
+  leftForeArm: ['mixamorig1LeftForeArm', 'mixamorig:LeftForeArm', 'LeftForeArm', 'leftForeArm', 'left_forearm'],
+  leftHand: ['mixamorig1LeftHand', 'mixamorig:LeftHand', 'LeftHand', 'leftHand', 'left_hand'],
+  rightUpLeg: ['mixamorig1RightUpLeg', 'mixamorig:RightUpLeg', 'RightUpLeg', 'rightUpLeg', 'right_up_leg'],
+  rightLeg: ['mixamorig1RightLeg', 'mixamorig:RightLeg', 'RightLeg', 'rightLeg', 'right_leg'],
+  leftUpLeg: ['mixamorig1LeftUpLeg', 'mixamorig:LeftUpLeg', 'LeftUpLeg', 'leftUpLeg', 'left_up_leg'],
+  leftLeg: ['mixamorig1LeftLeg', 'mixamorig:LeftLeg', 'LeftLeg', 'leftLeg', 'left_leg'],
 };
 
 function findBone(model, boneKey) {

@@ -73,7 +73,7 @@ export class MenuAvatarPreview {
     this.canvas = canvas;
     this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    
+
     const w = canvas.clientWidth || 300;
     const h = canvas.clientHeight || 380;
     this.renderer.setSize(w, h, false);
@@ -90,19 +90,32 @@ export class MenuAvatarPreview {
     dir2.position.set(-2, 2, -2);
     this.scene.add(amb, dir1, dir2);
 
-    const { root, joints, weaponAnchor } = buildHumanoid(0, false);
-    this.avatarRoot = root;
-    this.weaponAnchor = weaponAnchor;
-    this.scene.add(root);
-
-    // Pose arms for natural weapon showcase posture
-    if (joints.upperArmR) joints.upperArmR.rotation.x = -0.5;
-    if (joints.forearmR) joints.forearmR.rotation.x = -0.3;
-    if (joints.upperArmL) joints.upperArmL.rotation.x = -0.4;
-    if (joints.forearmL) joints.forearmL.rotation.x = -0.25;
-
+    this.avatarRoot = null;
+    this.weaponAnchor = null;
+    this.joints = null;
     this.animTime = 0;
     this.isRunning = false;
+
+    // Load avatar asynchronously
+    this.loadAvatar();
+  }
+
+  async loadAvatar() {
+    try {
+      const { root, joints, weaponAnchor } = await buildHumanoid(0, false);
+      this.avatarRoot = root;
+      this.weaponAnchor = weaponAnchor;
+      this.joints = joints;
+      this.scene.add(root);
+
+      // Pose arms for natural weapon showcase posture (Mixamo bone names)
+      if (joints.rightArm) joints.rightArm.rotation.x = -0.5;
+      if (joints.rightForeArm) joints.rightForeArm.rotation.x = -0.3;
+      if (joints.leftArm) joints.leftArm.rotation.x = -0.4;
+      if (joints.leftForeArm) joints.leftForeArm.rotation.x = -0.25;
+    } catch (err) {
+      console.error('Failed to load menu avatar:', err);
+    }
   }
 
   updateWeapon(weaponType) {
