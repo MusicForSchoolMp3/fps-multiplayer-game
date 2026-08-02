@@ -414,6 +414,8 @@ export async function buildFPHands() {
 
   // Find bones
   const bones = {
+    hips: findBone(root, 'hips'),
+    spine: findBone(root, 'spine'),
     head: findBone(root, 'head'),
     rightArm: findBone(root, 'rightArm'),
     rightForeArm: findBone(root, 'rightForeArm'),
@@ -421,6 +423,8 @@ export async function buildFPHands() {
     leftArm: findBone(root, 'leftArm'),
     leftForeArm: findBone(root, 'leftForeArm'),
     leftHand: findBone(root, 'leftHand'),
+    rightUpLeg: findBone(root, 'rightUpLeg'),
+    leftUpLeg: findBone(root, 'leftUpLeg'),
   };
 
   // Ensure character meshes are visible
@@ -432,10 +436,17 @@ export async function buildFPHands() {
     }
   });
 
-  // Scale down head bone so head geometry doesn't clip/block camera view
-  if (bones.head) {
-    bones.head.scale.set(0.001, 0.001, 0.001);
-  }
+  // Dedicated FPS View Model: Collapse head, torso, spine, hips, and legs to 0
+  const spine2 = root.getObjectByName('mixamorig1:Spine2') || root.getObjectByName('Spine2');
+  const spine1 = root.getObjectByName('mixamorig1:Spine1') || root.getObjectByName('Spine1');
+  const hideBones = [bones.head, spine2, spine1, bones.spine, bones.hips, bones.rightUpLeg, bones.leftUpLeg];
+  hideBones.forEach(b => {
+    if (b) b.scale.set(0.0001, 0.0001, 0.0001);
+  });
+
+  // Restore arm scales so only arms and hands render at full 1.0 scale
+  if (bones.rightArm) bones.rightArm.scale.set(10000, 10000, 10000);
+  if (bones.leftArm) bones.leftArm.scale.set(10000, 10000, 10000);
 
   // Create weapon socket on right hand
   const weaponSocket = createWeaponSocket(bones.rightHand);
@@ -449,10 +460,10 @@ export async function buildFPHands() {
   const animator = new AvatarAnimator(root, animationClips);
   animator.play('idle');
 
-  // Position for first-person view: place torso behind camera lens so arms extend forward
+  // Position FPS view model attached to camera
   const group = new THREE.Group();
   group.add(root);
-  root.position.set(0, -1.52, 0.28);
+  root.position.set(0, -1.65, 0);
   root.rotation.set(0, 0, 0);
 
   return { group, weapon: weaponGroup, animator, root };
