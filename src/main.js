@@ -1316,8 +1316,20 @@ async function ensureLocalBody() {
   hitbox.position.set(0, 1, 0);
   root.add(hitbox);
 
+  // Position at player's current position if controller exists
+  if (controller) {
+    root.position.set(
+      controller.position.x,
+      controller.position.y - EYE_HEIGHT,
+      controller.position.z
+    );
+    root.rotation.y = controller.yaw + Math.PI;
+    console.log('Local body positioned at:', root.position);
+  }
+
   scene.add(root);
   localBodyAvatar = { root, joints, animator, hitbox };
+  console.log('Local body avatar created and added to scene');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1620,6 +1632,16 @@ function gameLoop() {
     localAnimState.pitch      = controller.pitch;
     localAnimState.velocityY  = controller.velocity.y || 0;
     animateAvatar(localBodyAvatar, localAnimState, delta);
+
+    // Debug: log position occasionally
+    if (Math.random() < 0.01) {
+      console.log('Local body position:', feetPos, 'Controller position:', controller.position);
+    }
+  } else {
+    // Debug: log why not updating
+    if (Math.random() < 0.01) {
+      console.log('Not updating local body - localBodyAvatar:', !!localBodyAvatar, 'isDead:', isDead);
+    }
   }
 
   // ── Third-person camera override ──────────────────────────────────────────
