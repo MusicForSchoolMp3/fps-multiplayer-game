@@ -1667,18 +1667,19 @@ function gameLoop() {
       // Check distance from camera
       const distToCamera = camera.position.distanceTo(worldPos);
       console.log('Distance to camera:', distToCamera);
-      // Check if in camera frustum
-      const frustum = new THREE.Frustum();
-      const projScreenMatrix = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-      frustum.setFromProjectionMatrix(projScreenMatrix);
-      const inFrustum = frustum.intersectsObject(localBodyAvatar.root);
-      console.log('In camera frustum:', inFrustum);
-      // Force frustum culling check off temporarily
-      localBodyAvatar.root.traverse((child) => {
-        if (child.isMesh) {
-          child.frustumCulled = false;
+      // Check camera position
+      console.log('Camera position:', camera.position);
+      // Check isThirdPerson
+      console.log('isThirdPerson:', isThirdPerson);
+      // Count all avatar-root objects in scene
+      let avatarRootCount = 0;
+      scene.traverse((child) => {
+        if (child.name === 'avatar-root') {
+          avatarRootCount++;
+          console.log('Avatar-root found at:', child.position);
         }
       });
+      console.log('Total avatar-root objects in scene:', avatarRootCount);
     }
   } else {
     // Debug: log why not updating
@@ -1710,6 +1711,12 @@ function gameLoop() {
 
     camera.position.set(camX, camY, camZ);
     camera.lookAt(target);
+
+    // Debug: log third-person camera target
+    if (Math.random() < 0.01) {
+      console.log('Third-person target:', target);
+      console.log('Third-person camera position:', camera.position);
+    }
   }
 
   // ── Send movement ─────────────────────────────────────────────────────────
