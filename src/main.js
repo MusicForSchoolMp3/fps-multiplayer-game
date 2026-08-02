@@ -1658,6 +1658,12 @@ function gameLoop() {
         if (child.isMesh && child.visible) visibleMeshCount++;
       });
       console.log('Visible meshes:', visibleMeshCount);
+      // Check if avatar is in scene
+      console.log('Avatar in scene:', scene.children.includes(localBodyAvatar.root));
+      // Check world position after matrix update
+      const worldPos = new THREE.Vector3();
+      localBodyAvatar.root.getWorldPosition(worldPos);
+      console.log('World position:', worldPos);
     }
   } else {
     // Debug: log why not updating
