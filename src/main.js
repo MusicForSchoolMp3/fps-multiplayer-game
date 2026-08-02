@@ -347,7 +347,7 @@ function setupAuthUI() {
 //  GAME INITIALIZATION  (called once after successful auth)
 // ══════════════════════════════════════════════════════════════════════════════
 
-function startGame() {
+async function startGame() {
   localUsername = sessionUsername;
 
   // ── Renderer ──────────────────────────────────────────────────────────────
@@ -821,10 +821,10 @@ function startGame() {
 function setupMenuButtons() {
   // Account Menu Play Button
   if (menuPlayBtn) {
-    menuPlayBtn.addEventListener('click', () => {
+    menuPlayBtn.addEventListener('click', async () => {
       accountMenu.style.display = 'none';
       if (!isGameStarted) {
-        startGame();
+        await startGame();
       } else {
         lockScreen.style.display = 'flex';
         viewIndicator.style.display = 'block';
