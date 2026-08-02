@@ -140,7 +140,7 @@ let fpHandsGroup;
 let fpHandsAnimator;
 let fpHandsRoot;
 let localBodyAvatar   = null; // full body for third-person view
-let localAnimState    = { time: 0, speed: 0, isGrounded: true, pitch: 0 };
+let localAnimState    = { time: 0, speed: 0, isGrounded: true, pitch: 0, velocityY: 0, isShooting: false, isReloading: false };
 let isThirdPerson     = false;
 let isDead            = false;
 let localHealth       = 100;
@@ -768,7 +768,8 @@ async function startGame() {
   const ui = { ammoEl, reserveEl, reloadEl, showHitmarker, weaponEl: weaponNameEl };
   weapon   = new WeaponSystem(camera, scene, net, controller, ui, 
     () => isThirdPerson, 
-    () => localBodyAvatar
+    () => localBodyAvatar,
+    () => localAnimState
   );
   weapon.setFPHandsGroup(fpHandsGroup);
   weapon.remotePlayers = remotePlayers;
@@ -1457,6 +1458,17 @@ function setupNetworkCallbacks() {
     alert(message || 'You have been logged in from another location');
     signOut();
   };
+
+  net.onPlayerAnim = (id, anim) => {
+    const rp = remotePlayers.get(id);
+    if (rp && rp.animState) {
+      if (anim === 'shoot') {
+        rp.animState.isShooting = true;
+      } else if (anim === 'reload') {
+        rp.animState.isReloading = true;
+      }
+    }
+  };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1488,7 +1500,7 @@ async function spawnRemotePlayer(id, data) {
   root.add(hitbox);
 
   scene.add(root);
-  const animState = { time: 0, speed: 0, isGrounded: true, pitch: 0, velocityY: 0 };
+  const animState = { time: 0, speed: 0, isGrounded: true, pitch: 0, velocityY: 0, isShooting: false, isReloading: false };
   remotePlayers.set(id, { root, joints, animator, animState, label, hitbox });
 
   scores.set(id, { kills: data.kills || 0, deaths: data.deaths || 0, name: uname });

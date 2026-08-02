@@ -28,6 +28,7 @@ export class NetworkManager {
     this.onChatMessage = null; // (data) => {}
     this.onPlayerWeaponChange = null; // (id, weapon) => {}
     this.onDuplicateLogin = null; // (message) => {}
+    this.onPlayerAnim = null; // (id, anim) => {}
 
     this._setupEvents();
 
@@ -110,6 +111,10 @@ export class NetworkManager {
 
     this.socket.on('duplicate_login', (data) => {
       if (this.onDuplicateLogin) this.onDuplicateLogin(data.message);
+    });
+
+    this.socket.on('player_anim', (data) => {
+      if (this.onPlayerAnim) this.onPlayerAnim(data.id, data.anim);
     });
   }
 
