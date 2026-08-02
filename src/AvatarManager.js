@@ -136,19 +136,19 @@ function loadCharacter() {
 
 // ── Flexible Bone Finder for Mixamo Skeleton ─────────────────────────────────────
 const BONE_PATTERNS = {
-  hips: ['mixamorig1Hips', 'mixamorig:Hips', 'Hips', 'hip'],
-  spine: ['mixamorig1Spine', 'mixamorig:Spine', 'Spine', 'spine'],
-  head: ['mixamorig1Head', 'mixamorig:Head', 'Head', 'head'],
-  rightArm: ['mixamorig1RightArm', 'mixamorig:RightArm', 'RightArm', 'rightArm', 'right_arm'],
-  rightForeArm: ['mixamorig1RightForeArm', 'mixamorig:RightForeArm', 'RightForeArm', 'rightForeArm', 'right_forearm'],
-  rightHand: ['mixamorig1RightHand', 'mixamorig:RightHand', 'RightHand', 'rightHand', 'right_hand'],
-  leftArm: ['mixamorig1LeftArm', 'mixamorig:LeftArm', 'LeftArm', 'leftArm', 'left_arm'],
-  leftForeArm: ['mixamorig1LeftForeArm', 'mixamorig:LeftForeArm', 'LeftForeArm', 'leftForeArm', 'left_forearm'],
-  leftHand: ['mixamorig1LeftHand', 'mixamorig:LeftHand', 'LeftHand', 'leftHand', 'left_hand'],
-  rightUpLeg: ['mixamorig1RightUpLeg', 'mixamorig:RightUpLeg', 'RightUpLeg', 'rightUpLeg', 'right_up_leg'],
-  rightLeg: ['mixamorig1RightLeg', 'mixamorig:RightLeg', 'RightLeg', 'rightLeg', 'right_leg'],
-  leftUpLeg: ['mixamorig1LeftUpLeg', 'mixamorig:LeftUpLeg', 'LeftUpLeg', 'leftUpLeg', 'left_up_leg'],
-  leftLeg: ['mixamorig1LeftLeg', 'mixamorig:LeftLeg', 'LeftLeg', 'leftLeg', 'left_leg'],
+  hips: ['mixamorig1:Hips', 'mixamorig1Hips', 'mixamorig:Hips', 'Hips', 'hip'],
+  spine: ['mixamorig1:Spine', 'mixamorig1Spine', 'mixamorig:Spine', 'Spine', 'spine'],
+  head: ['mixamorig1:Head', 'mixamorig1Head', 'mixamorig:Head', 'Head', 'head'],
+  rightArm: ['mixamorig1:RightArm', 'mixamorig1RightArm', 'mixamorig:RightArm', 'RightArm', 'rightArm', 'right_arm'],
+  rightForeArm: ['mixamorig1:RightForeArm', 'mixamorig1RightForeArm', 'mixamorig:RightForeArm', 'RightForeArm', 'rightForeArm', 'right_forearm'],
+  rightHand: ['mixamorig1:RightHand', 'mixamorig1RightHand', 'mixamorig:RightHand', 'RightHand', 'rightHand', 'right_hand'],
+  leftArm: ['mixamorig1:LeftArm', 'mixamorig1LeftArm', 'mixamorig:LeftArm', 'LeftArm', 'leftArm', 'left_arm'],
+  leftForeArm: ['mixamorig1:LeftForeArm', 'mixamorig1LeftForeArm', 'mixamorig:LeftForeArm', 'LeftForeArm', 'leftForeArm', 'left_forearm'],
+  leftHand: ['mixamorig1:LeftHand', 'mixamorig1LeftHand', 'mixamorig:LeftHand', 'LeftHand', 'leftHand', 'left_hand'],
+  rightUpLeg: ['mixamorig1:RightUpLeg', 'mixamorig1RightUpLeg', 'mixamorig:RightUpLeg', 'RightUpLeg', 'rightUpLeg', 'right_up_leg'],
+  rightLeg: ['mixamorig1:RightLeg', 'mixamorig1RightLeg', 'mixamorig:RightLeg', 'RightLeg', 'rightLeg', 'right_leg'],
+  leftUpLeg: ['mixamorig1:LeftUpLeg', 'mixamorig1LeftUpLeg', 'mixamorig:LeftUpLeg', 'LeftUpLeg', 'leftUpLeg', 'left_up_leg'],
+  leftLeg: ['mixamorig1:LeftLeg', 'mixamorig1LeftLeg', 'mixamorig:LeftLeg', 'LeftLeg', 'leftLeg', 'left_leg'],
 };
 
 function findBone(model, boneKey) {
@@ -158,7 +158,6 @@ function findBone(model, boneKey) {
   for (const pattern of patterns) {
     const bone = model.getObjectByName(pattern);
     if (bone) {
-      console.log(`Found ${boneKey}: ${pattern}`);
       return bone;
     }
   }
@@ -167,7 +166,6 @@ function findBone(model, boneKey) {
 }
 
 function logBoneHierarchy(model, indent = 0) {
-  console.log('Bone hierarchy:');
   model.traverse((child) => {
     if (child.isBone) {
       console.log('  '.repeat(indent) + child.name);
@@ -196,7 +194,6 @@ async function loadAnimations() {
       loader.load(path, (gltf) => {
         if (gltf.animations && gltf.animations.length > 0) {
           animationClips[name] = gltf.animations[0];
-          console.log(`Loaded animation: ${name}`);
         }
         resolve();
       }, undefined, () => resolve()); // Continue on error
@@ -214,7 +211,7 @@ class AvatarAnimator {
     this.mixer = new THREE.AnimationMixer(model);
     this.clips = clips;
     this.currentAction = null;
-    this.currentState = 'idle';
+    this.currentState = null;
   }
   
   play(name, fadeDuration = 0.2) {
@@ -222,19 +219,20 @@ class AvatarAnimator {
     
     const clip = this.clips[name];
     if (!clip) {
-      console.warn(`Animation not found: ${name}`);
       return;
     }
     
     const newAction = this.mixer.clipAction(clip);
+    newAction.reset();
+    newAction.enabled = true;
+    newAction.setEffectiveTimeScale(1);
+    newAction.setEffectiveWeight(1);
+    newAction.play();
     
-    if (this.currentAction) {
-      this.currentAction.crossFadeTo(newAction, fadeDuration);
-    } else {
-      newAction.fadeIn(fadeDuration);
+    if (this.currentAction && this.currentAction !== newAction) {
+      this.currentAction.crossFadeTo(newAction, fadeDuration, true);
     }
     
-    newAction.play();
     this.currentAction = newAction;
     this.currentState = name;
   }
@@ -249,15 +247,13 @@ function createWeaponSocket(rightHandBone) {
   const socket = new THREE.Object3D();
   socket.name = 'weaponSocket';
   
-  // Initial positioning (will need tweaking)
-  socket.position.set(0, 0, 0);
-  socket.rotation.set(0, 0, 0);
-  
-  rightHandBone.add(socket);
-  
-  console.log('Weapon socket created on:', rightHandBone.name);
-  console.log('Socket position:', socket.position);
-  console.log('Socket rotation:', socket.rotation);
+  if (rightHandBone) {
+    socket.position.set(0.06, 0.12, 0.03);
+    socket.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+    rightHandBone.add(socket);
+  } else {
+    console.warn('Right hand bone not found for weapon socket');
+  }
   
   return socket;
 }
@@ -477,7 +473,7 @@ export function animateAvatar(avatarData, animState, delta) {
   if (!isGrounded) {
     // Jumping or falling
     targetAnim = animState.velocityY > 0 ? 'jump' : 'fall';
-  } else if (speed > 4.0) {
+  } else if (speed > 6.5) {
     // Sprinting
     targetAnim = 'run';
   } else if (speed > 0.1) {

@@ -95,6 +95,7 @@ export class MenuAvatarPreview {
     this.joints = null;
     this.animTime = 0;
     this.isRunning = false;
+    this.currentWeaponType = 'ar';
 
     // Load avatar asynchronously
     this.loadAvatar();
@@ -109,6 +110,10 @@ export class MenuAvatarPreview {
       this.animator = animator;
       this.scene.add(root);
 
+      if (this.weaponAnchor) {
+        setWeaponType(this.weaponAnchor, this.currentWeaponType);
+      }
+
       // Start idle animation
       if (animator) {
         animator.play('idle');
@@ -119,6 +124,7 @@ export class MenuAvatarPreview {
   }
 
   updateWeapon(weaponType) {
+    this.currentWeaponType = weaponType;
     if (this.weaponAnchor) {
       setWeaponType(this.weaponAnchor, weaponType);
     }

@@ -950,14 +950,16 @@ function setupCharacterPreviewAndSkins() {
 
   // Keep weapon tag in sync with current weapon
   function updateCharPanelTag() {
-    const tag = document.getElementById('char-weapon-tag');
-    if (tag && menuAvatarPreview) {
-      // We show whatever the weapon system says, or 'AR' before game starts
-      const wName = weapon ? weapon.currentWeapon.toUpperCase() : 'AR';
-      tag.textContent = wName;
-      menuAvatarPreview.updateWeapon(weapon ? weapon.currentWeapon : 'ar');
+    if (menuAvatarPreview) {
+      const currentW = weapon ? weapon.currentWeapon : 'ar';
+      const tag = document.getElementById('char-weapon-tag');
+      if (tag) tag.textContent = currentW.toUpperCase();
+      menuAvatarPreview.updateWeapon(currentW);
     }
   }
+
+  // Initial update
+  updateCharPanelTag();
 
   // Patch weapon.switchWeapon to also update the preview
   const _origSwitch = WeaponSystem.prototype.switchWeapon;
