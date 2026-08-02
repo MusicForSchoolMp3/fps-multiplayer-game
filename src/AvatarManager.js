@@ -449,10 +449,10 @@ export async function buildFPHands() {
   const animator = new AvatarAnimator(root, animationClips);
   animator.play('idle');
 
-  // Position for first-person view (eyes aligned at camera Y=0)
+  // Position for first-person view: place torso behind camera lens so arms extend forward
   const group = new THREE.Group();
   group.add(root);
-  root.position.set(0, -1.65, 0);
+  root.position.set(0, -1.52, 0.28);
   root.rotation.set(0, 0, 0);
 
   return { group, weapon: weaponGroup, animator, root };
