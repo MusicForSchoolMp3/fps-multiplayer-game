@@ -754,7 +754,7 @@ async function startGame() {
   setupNetworkCallbacks();
 
   // ── FP hands ──────────────────────────────────────────────────────────────
-  const fp = await buildFPHands();
+  const fp = buildFPHands();
   fpHandsGroup = fp.group;
   fpHandsAnimator = fp.animator;
   fpHandsRoot = fp.root;

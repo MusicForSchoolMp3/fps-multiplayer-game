@@ -404,101 +404,81 @@ export function buildWeaponContainer() {
 // Build first-person hands + weapon (visible only to local player)
 // Uses Mixamo character arms instead of blocky meshes
 // ─────────────────────────────────────────────────────────────────────────────
-export async function buildFPHands() {
-  await loadCharacter();
-  await loadAnimations();
+export function buildFPHands() {
+  // ── Dedicated FPS view model ──────────────────────────────────────────────
+  // This is a completely separate model from the world body (which stays intact
+  // for third-person and networking). It is parented directly to the camera.
+  // No GLB clone is used — a separate skinned mesh would always show the full
+  // body and is impossible to mask to arms-only without scuffing the geometry.
 
-  // Clone character for first-person view properly using SkeletonUtils
-  const root = SkeletonUtils.clone(characterTemplate);
-  root.name = 'fp-hands-root';
+  const skinMat   = new THREE.MeshLambertMaterial({ color: 0xc68642 }); // skin tone
+  const sleeveMat = new THREE.MeshLambertMaterial({ color: 0x1a2a4a }); // dark tactical sleeve
 
-  // Find bones
-  const bones = {
-    hips: findBone(root, 'hips'),
-    spine: findBone(root, 'spine'),
-    head: findBone(root, 'head'),
-    rightArm: findBone(root, 'rightArm'),
-    rightForeArm: findBone(root, 'rightForeArm'),
-    rightHand: findBone(root, 'rightHand'),
-    leftArm: findBone(root, 'leftArm'),
-    leftForeArm: findBone(root, 'leftForeArm'),
-    leftHand: findBone(root, 'leftHand'),
-    rightUpLeg: findBone(root, 'rightUpLeg'),
-    leftUpLeg: findBone(root, 'leftUpLeg'),
-  };
+  const group = new THREE.Group();
+  group.name = 'fp-viewmodel';
 
-  // Dedicated FPS View Model: Collapse all non-arm vertices (head, torso, legs) to (0,0,0)
-  root.traverse((child) => {
-    if (child.isSkinnedMesh && child.skeleton && child.geometry) {
-      child.visible = true;
-      child.castShadow = true;
-      child.receiveShadow = true;
+  // ── Helper: build one arm (sleeve + forearm skin + hand) ──────────────────
+  function makeArm(side) { // side: 1 = right, -1 = left
+    const arm = new THREE.Group();
 
-      // Find bone indices corresponding to arms, forearms, hands, and fingers
-      const armBoneIndices = new Set();
-      child.skeleton.bones.forEach((bone, idx) => {
-        const bName = bone.name.toLowerCase();
-        if (bName.includes('arm') || bName.includes('hand') || bName.includes('forearm')) {
-          armBoneIndices.add(idx);
-        }
-      });
+    // Upper sleeve (wider, clothing colour)
+    const sleeve = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.042, 0.048, 0.20, 10),
+      sleeveMat
+    );
+    sleeve.rotation.x = Math.PI / 2;
+    sleeve.position.z = -0.10;
+    arm.add(sleeve);
 
-      const geom = child.geometry;
-      const skinIdx = geom.attributes.skinIndex;
-      const skinWt  = geom.attributes.skinWeight;
-      const posArr  = geom.attributes.position;
+    // Forearm / wrist (skin colour, slightly narrower)
+    const forearm = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.032, 0.040, 0.18, 10),
+      skinMat
+    );
+    forearm.rotation.x = Math.PI / 2;
+    forearm.position.z = 0.09;
+    arm.add(forearm);
 
-      if (skinIdx && skinWt && posArr) {
-        // Clone position attribute to avoid modifying characterTemplate geometry
-        geom.attributes.position = posArr.clone();
-        const pos = geom.attributes.position;
+    // Hand (flat box)
+    const hand = new THREE.Mesh(
+      new THREE.BoxGeometry(0.072, 0.040, 0.095),
+      skinMat
+    );
+    hand.position.set(0, -0.004, 0.225);
+    arm.add(hand);
 
-        for (let i = 0; i < pos.count; i++) {
-          const ix = skinIdx.getX(i);
-          const iy = skinIdx.getY(i);
-          const iz = skinIdx.getZ(i);
-          const iw = skinIdx.getW(i);
+    return arm;
+  }
 
-          const wx = skinWt.getX(i);
-          const wy = skinWt.getY(i);
-          const wz = skinWt.getZ(i);
-          const ww = skinWt.getW(i);
+  // ── Right arm — weapon hand ────────────────────────────────────────────────
+  const rightArm = makeArm(1);
+  // Position: lower-right of screen, angled naturally
+  rightArm.position.set(0.27, -0.28, -0.38);
+  rightArm.rotation.set(0.18, 0.08, 0.04);
+  group.add(rightArm);
 
-          let armWeight = 0;
-          if (armBoneIndices.has(ix)) armWeight += wx;
-          if (armBoneIndices.has(iy)) armWeight += wy;
-          if (armBoneIndices.has(iz)) armWeight += wz;
-          if (armBoneIndices.has(iw)) armWeight += ww;
+  // ── Left arm — support hand ────────────────────────────────────────────────
+  const leftArm = makeArm(-1);
+  leftArm.position.set(-0.21, -0.30, -0.32);
+  leftArm.rotation.set(0.14, -0.08, -0.04);
+  group.add(leftArm);
 
-          // Collapse non-arm vertices to origin (completely hiding head, neck, torso, legs)
-          if (armWeight < 0.3) {
-            pos.setXYZ(i, 0, 0, 0);
-          }
-        }
-        pos.needsUpdate = true;
-      }
-    }
-  });
-
-  // Create weapon socket on right hand
-  const weaponSocket = createWeaponSocket(bones.rightHand);
-
-  // Attach weapon container to socket
+  // ── Weapon container attached to right hand position ──────────────────────
   const weaponGroup = buildWeaponContainer();
   weaponGroup.name = 'weapon';
-  weaponSocket.add(weaponGroup);
+  // Offset so the weapon sits naturally in the hand, angled forward
+  weaponGroup.position.set(0, 0.01, 0.12);
+  weaponGroup.rotation.set(0, 0, 0);
+  rightArm.add(weaponGroup);
 
-  // Create animator for hands
-  const animator = new AvatarAnimator(root, animationClips);
-  animator.play('idle');
+  // ── Dummy animator (no mixer needed — this model has no rig) ──────────────
+  const animator = {
+    play:  () => {},
+    update: () => {},
+    currentState: 'idle',
+  };
 
-  // Position FPS view model attached to camera
-  const group = new THREE.Group();
-  group.add(root);
-  root.position.set(0, -1.65, 0);
-  root.rotation.set(0, 0, 0);
-
-  return { group, weapon: weaponGroup, animator, root };
+  return { group, weapon: weaponGroup, animator, root: group };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
