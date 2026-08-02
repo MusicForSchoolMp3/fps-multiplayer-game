@@ -1,7 +1,7 @@
 // ─── AvatarManager.js ───────────────────────────────────────────────────────
-// Procedurally builds a rigged humanoid 3D avatar with a weapon attached to hands.
+// Mixamo-based avatar system with AnimationMixer and weapon attachment.
 // Local player: only first-person hands + gun visible.
-// Remote players: full body renders with joint animation.
+// Remote players: full body renders with Mixamo animations.
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -96,7 +96,180 @@ export function setWeaponType(container, type) {
   });
 }
 
-// ── Shared geometry / material cache ─────────────────────────────────────────
+// ── Mixamo Character Loading System ─────────────────────────────────────────────
+let characterTemplate = null;
+let characterLoadPromise = null;
+
+function loadCharacter() {
+  if (characterLoadPromise) return characterLoadPromise;
+  characterLoadPromise = new Promise((resolve, reject) => {
+    const loader = new GLTFLoader();
+    loader.load('/NEW character/Character.glb', (gltf) => {
+      const model = gltf.scene;
+      
+      // Enable shadows
+      model.traverse((child) => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+      
+      // Calculate scale to 1.7 units
+      const box = new THREE.Box3().setFromObject(model);
+      const height = box.max.y - box.min.y;
+      const scale = 1.7 / height;
+      model.scale.set(scale, scale, scale);
+      
+      // Center on ground
+      const center = box.getCenter(new THREE.Vector3());
+      model.position.y = -box.min.y * scale;
+      
+      characterTemplate = model;
+      console.log('Character loaded and scaled to 1.7 units');
+      resolve(model);
+    }, undefined, reject);
+  });
+  return characterLoadPromise;
+}
+
+// ── Flexible Bone Finder for Mixamo Skeleton ─────────────────────────────────────
+const BONE_PATTERNS = {
+  hips: ['mixamorig:Hips', 'Hips', 'hip'],
+  spine: ['mixamorig:Spine', 'Spine', 'spine'],
+  head: ['mixamorig:Head', 'Head', 'head'],
+  rightArm: ['mixamorig:RightArm', 'RightArm', 'rightArm', 'right_arm'],
+  rightForeArm: ['mixamorig:RightForeArm', 'RightForeArm', 'rightForeArm', 'right_forearm'],
+  rightHand: ['mixamorig:RightHand', 'RightHand', 'rightHand', 'right_hand'],
+  leftArm: ['mixamorig:LeftArm', 'LeftArm', 'leftArm', 'left_arm'],
+  leftForeArm: ['mixamorig:LeftForeArm', 'LeftForeArm', 'leftForeArm', 'left_forearm'],
+  leftHand: ['mixamorig:LeftHand', 'LeftHand', 'leftHand', 'left_hand'],
+  rightUpLeg: ['mixamorig:RightUpLeg', 'RightUpLeg', 'rightUpLeg', 'right_up_leg'],
+  rightLeg: ['mixamorig:RightLeg', 'RightLeg', 'rightLeg', 'right_leg'],
+  leftUpLeg: ['mixamorig:LeftUpLeg', 'LeftUpLeg', 'leftUpLeg', 'left_up_leg'],
+  leftLeg: ['mixamorig:LeftLeg', 'LeftLeg', 'leftLeg', 'left_leg'],
+};
+
+function findBone(model, boneKey) {
+  const patterns = BONE_PATTERNS[boneKey];
+  if (!patterns) return null;
+  
+  for (const pattern of patterns) {
+    const bone = model.getObjectByName(pattern);
+    if (bone) {
+      console.log(`Found ${boneKey}: ${pattern}`);
+      return bone;
+    }
+  }
+  console.warn(`Bone not found: ${boneKey}`);
+  return null;
+}
+
+function logBoneHierarchy(model, indent = 0) {
+  console.log('Bone hierarchy:');
+  model.traverse((child) => {
+    if (child.isBone) {
+      console.log('  '.repeat(indent) + child.name);
+    }
+  });
+}
+
+// ── Animation Loading System ─────────────────────────────────────────────────────
+const ANIMATION_PATHS = {
+  idle: '/NEW character/Characters animations/ar and sniper IDLE.glb',
+  walk: '/NEW character/Characters animations/ar and sniper WALK.glb',
+  run: '/NEW character/Characters animations/ar and sniper RUN (shift).glb',
+  jump: '/NEW character/Characters animations/ar and sniper JUMP (jump up).glb',
+  fall: '/NEW character/Characters animations/ar and sniper FALL (jump down).glb',
+};
+
+let animationClips = {};
+let animationsLoaded = false;
+
+async function loadAnimations() {
+  if (animationsLoaded) return animationClips;
+  
+  const loader = new GLTFLoader();
+  const loadPromises = Object.entries(ANIMATION_PATHS).map(([name, path]) => {
+    return new Promise((resolve) => {
+      loader.load(path, (gltf) => {
+        if (gltf.animations && gltf.animations.length > 0) {
+          animationClips[name] = gltf.animations[0];
+          console.log(`Loaded animation: ${name}`);
+        }
+        resolve();
+      }, undefined, () => resolve()); // Continue on error
+    });
+  });
+  
+  await Promise.all(loadPromises);
+  animationsLoaded = true;
+  return animationClips;
+}
+
+// ── Animation State Machine Class ───────────────────────────────────────────────
+class AvatarAnimator {
+  constructor(model, clips) {
+    this.mixer = new THREE.AnimationMixer(model);
+    this.clips = clips;
+    this.currentAction = null;
+    this.currentState = 'idle';
+  }
+  
+  play(name, fadeDuration = 0.2) {
+    if (this.currentState === name && this.currentAction) return;
+    
+    const clip = this.clips[name];
+    if (!clip) {
+      console.warn(`Animation not found: ${name}`);
+      return;
+    }
+    
+    const newAction = this.mixer.clipAction(clip);
+    
+    if (this.currentAction) {
+      this.currentAction.crossFadeTo(newAction, fadeDuration);
+    } else {
+      newAction.fadeIn(fadeDuration);
+    }
+    
+    newAction.play();
+    this.currentAction = newAction;
+    this.currentState = name;
+  }
+  
+  update(delta) {
+    this.mixer.update(delta);
+  }
+}
+
+// ── Weapon Socket System ───────────────────────────────────────────────────────
+function createWeaponSocket(rightHandBone) {
+  const socket = new THREE.Object3D();
+  socket.name = 'weaponSocket';
+  
+  // Initial positioning (will need tweaking)
+  socket.position.set(0, 0, 0);
+  socket.rotation.set(0, 0, 0);
+  
+  rightHandBone.add(socket);
+  
+  console.log('Weapon socket created on:', rightHandBone.name);
+  console.log('Socket position:', socket.position);
+  console.log('Socket rotation:', socket.rotation);
+  
+  return socket;
+}
+
+// colours per player slot
+const PLAYER_COLORS = [0xff4444, 0x44aaff, 0x44ff88, 0xffcc44, 0xcc44ff, 0xff8844];
+
+// Materials for first-person hands
+const MAT = {
+  localSkin: new THREE.MeshLambertMaterial({ color: 0xd4a574 }),
+};
+
+// ── Shared geometry / material cache for procedural AR weapon ─────────────────
 const GEO_CACHE = {};
 function box(w, h, d) {
   const k = `${w},${h},${d}`;
@@ -104,161 +277,83 @@ function box(w, h, d) {
   return GEO_CACHE[k];
 }
 
-const MAT = {
-  skin:    new THREE.MeshLambertMaterial({ color: 0xd4956a }),
-  cloth:   new THREE.MeshLambertMaterial({ color: 0x2a3a5c }),
-  boot:    new THREE.MeshLambertMaterial({ color: 0x1a1a22 }),
+const WEAPON_MAT = {
   metal:   new THREE.MeshLambertMaterial({ color: 0x4a4a50 }),
   barrel:  new THREE.MeshLambertMaterial({ color: 0x222226 }),
   stock:   new THREE.MeshLambertMaterial({ color: 0x5c3a1e }),
-  local:   new THREE.MeshLambertMaterial({ color: 0x2a3a5c, transparent: true, opacity: 0.0 }), // hidden body
-  localSkin: new THREE.MeshLambertMaterial({ color: 0xd4956a }),
 };
 
-// colours per player slot
-const PLAYER_COLORS = [0xff4444, 0x44aaff, 0x44ff88, 0xffcc44, 0xcc44ff, 0xff8844];
-
 // ─────────────────────────────────────────────────────────────────────────────
-// Build a complete humanoid rig (group with named joints)
-// Returns: { root, joints:{}, weaponAnchor }
+// Build Mixamo humanoid rig with animations and weapon attachment
+// Returns: { root, joints:{}, weaponAnchor, animator }
 // ─────────────────────────────────────────────────────────────────────────────
-export function buildHumanoid(colorIndex = 0, isLocal = false) {
-  const root = new THREE.Group();
+export async function buildHumanoid(colorIndex = 0, isLocal = false) {
+  await loadCharacter();
+  await loadAnimations();
+  
+  // Clone character template
+  const root = characterTemplate.clone();
   root.name = 'avatar-root';
   
-  // Offset root so feet are at ground level when positioned at y=0
-  // Foot bottom is at y=-0.70 relative to root, so raise root by 0.70
-  root.position.y = 0;
-
-  const accentMat = new THREE.MeshLambertMaterial({
-    color: PLAYER_COLORS[colorIndex % PLAYER_COLORS.length],
+  // Log bone hierarchy for debugging
+  console.log('Bone hierarchy:');
+  logBoneHierarchy(root);
+  
+  // Find bones
+  const bones = {
+    hips: findBone(root, 'hips'),
+    spine: findBone(root, 'spine'),
+    head: findBone(root, 'head'),
+    rightArm: findBone(root, 'rightArm'),
+    rightForeArm: findBone(root, 'rightForeArm'),
+    rightHand: findBone(root, 'rightHand'),
+    leftArm: findBone(root, 'leftArm'),
+    leftForeArm: findBone(root, 'leftForeArm'),
+    leftHand: findBone(root, 'leftHand'),
+    rightUpLeg: findBone(root, 'rightUpLeg'),
+    rightLeg: findBone(root, 'rightLeg'),
+    leftUpLeg: findBone(root, 'leftUpLeg'),
+    leftLeg: findBone(root, 'leftLeg'),
+  };
+  
+  // Apply player color to materials
+  const playerColor = PLAYER_COLORS[colorIndex % PLAYER_COLORS.length];
+  root.traverse((child) => {
+    if (child.isMesh && child.material) {
+      // Clone material to avoid affecting other instances
+      child.material = child.material.clone();
+      // Apply color tint if needed (optional)
+    }
   });
-
-  // Helper to make a mesh
-  const mesh = (geo, mat) => {
-    const m = new THREE.Mesh(geo, mat);
-    m.castShadow = false;
-    return m;
-  };
-
-  // ── Torso ──────────────────────────────────────────────────────────────────
-  const torsoGroup = new THREE.Group();
-  torsoGroup.name = 'torso';
-  torsoGroup.position.y = 0.68;
-  const torsoMesh = mesh(box(0.5, 0.6, 0.25), isLocal ? MAT.local : MAT.cloth);
-  torsoMesh.position.y = 0.3;
-  // Accent stripe
-  const stripe = mesh(box(0.51, 0.08, 0.26), accentMat);
-  stripe.position.y = 0.38;
-  torsoGroup.add(torsoMesh, stripe);
-  root.add(torsoGroup);
-
-  // ── Head ──────────────────────────────────────────────────────────────────
-  const headGroup = new THREE.Group();
-  headGroup.name = 'head';
-  headGroup.position.y = 0.75;
-  const headMesh = mesh(box(0.35, 0.35, 0.32), isLocal ? MAT.local : MAT.skin);
-  headMesh.position.y = 0.175;
-  headGroup.add(headMesh);
-  torsoGroup.add(headGroup);
-
-  // ── Upper-arms ────────────────────────────────────────────────────────────
-  const makeArm = (side) => {
-    const sign = side === 'R' ? 1 : -1;
-    const upperGroup = new THREE.Group();
-    upperGroup.name = `upper-arm-${side}`;
-    upperGroup.position.set(sign * 0.32, 0.48, 0);
-
-    const upper = mesh(box(0.14, 0.28, 0.14), isLocal ? MAT.local : MAT.cloth);
-    upper.position.y = -0.14;
-    upperGroup.add(upper);
-
-    // forearm (pivot at elbow)
-    const foreGroup = new THREE.Group();
-    foreGroup.name = `forearm-${side}`;
-    foreGroup.position.y = -0.28;
-
-    const fore = mesh(box(0.12, 0.26, 0.12), isLocal ? MAT.local : MAT.skin);
-    fore.position.y = -0.13;
-    foreGroup.add(fore);
-
-    // hand
-    const handGroup = new THREE.Group();
-    handGroup.name = `hand-${side}`;
-    handGroup.position.y = -0.26;
-    const hand = mesh(box(0.12, 0.1, 0.1), isLocal ? MAT.local : MAT.skin);
-    hand.position.y = -0.05;
-    handGroup.add(hand);
-    foreGroup.add(handGroup);
-
-    upperGroup.add(foreGroup);
-    torsoGroup.add(upperGroup);
-    return { upperGroup, foreGroup, handGroup };
-  };
-
-  const armR = makeArm('R');
-  const armL = makeArm('L');
-
-  // ── Legs ──────────────────────────────────────────────────────────────────
-  const makeLeg = (side) => {
-    const sign = side === 'R' ? 1 : -1;
-    const upperGroup = new THREE.Group();
-    upperGroup.name = `upper-leg-${side}`;
-    upperGroup.position.set(sign * 0.14, 0.0, 0);
-
-    const upper = mesh(box(0.18, 0.32, 0.18), isLocal ? MAT.local : accentMat);
-    upper.position.y = -0.16;
-    upperGroup.add(upper);
-
-    const lowerGroup = new THREE.Group();
-    lowerGroup.name = `lower-leg-${side}`;
-    lowerGroup.position.y = -0.32;
-
-    const lower = mesh(box(0.15, 0.3, 0.15), isLocal ? MAT.local : MAT.cloth);
-    lower.position.y = -0.15;
-    lowerGroup.add(lower);
-
-    const foot = mesh(box(0.15, 0.08, 0.22), isLocal ? MAT.local : MAT.boot);
-    foot.position.set(0, -0.34, 0.04);
-    lowerGroup.add(foot);
-
-    upperGroup.add(lowerGroup);
-    torsoGroup.add(upperGroup);
-    return { upperGroup, lowerGroup };
-  };
-
-  const legR = makeLeg('R');
-  const legL = makeLeg('L');
-
-  // ── Weapon ────────────────────────────────────────────────────────────────
+  
+  // Hide body mesh for local player (first-person)
+  if (isLocal) {
+    root.traverse((child) => {
+      if (child.isMesh) {
+        child.visible = false;
+      }
+    });
+  }
+  
+  // Create weapon socket on right hand
+  const weaponSocket = createWeaponSocket(bones.rightHand);
+  
+  // Attach weapon container to socket
   const weaponGroup = buildWeaponContainer();
   weaponGroup.name = 'weapon';
-
-  // Attach weapon to right hand
-  armR.handGroup.add(weaponGroup);
-  weaponGroup.position.set(-0.06, -0.08, -0.22);
-  weaponGroup.rotation.set(0, Math.PI, 0);
-
-  // Expose anchor for first-person hands
-  const weaponAnchor = weaponGroup;
-
-  // Named joint map for animation
-  const joints = {
-    torso: torsoGroup,
-    head: headGroup,
-    upperArmR: armR.upperGroup,
-    forearmR: armR.foreGroup,
-    handR: armR.handGroup,
-    upperArmL: armL.upperGroup,
-    forearmL: armL.foreGroup,
-    handL: armL.handGroup,
-    upperLegR: legR.upperGroup,
-    lowerLegR: legR.lowerGroup,
-    upperLegL: legL.upperGroup,
-    lowerLegL: legL.lowerGroup,
+  weaponSocket.add(weaponGroup);
+  
+  // Create animator
+  const animator = new AvatarAnimator(root, animationClips);
+  animator.play('idle');
+  
+  // Return compatible structure
+  return {
+    root,
+    joints: bones,
+    weaponAnchor: weaponGroup,
+    animator
   };
-
-  return { root, joints, weaponAnchor };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -268,27 +363,27 @@ export function buildWeapon() {
   const group = new THREE.Group();
 
   // Body / receiver
-  const body = new THREE.Mesh(box(0.08, 0.08, 0.38), MAT.metal);
+  const body = new THREE.Mesh(box(0.08, 0.08, 0.38), WEAPON_MAT.metal);
   body.position.z = 0;
   group.add(body);
 
   // Barrel
-  const barrel = new THREE.Mesh(box(0.04, 0.04, 0.24), MAT.barrel);
+  const barrel = new THREE.Mesh(box(0.04, 0.04, 0.24), WEAPON_MAT.barrel);
   barrel.position.set(0, 0.03, -0.28);
   group.add(barrel);
 
   // Stock
-  const stock = new THREE.Mesh(box(0.06, 0.1, 0.14), MAT.stock);
+  const stock = new THREE.Mesh(box(0.06, 0.1, 0.14), WEAPON_MAT.stock);
   stock.position.set(0, -0.02, 0.22);
   group.add(stock);
 
   // Magazine
-  const mag = new THREE.Mesh(box(0.055, 0.12, 0.07), MAT.metal);
+  const mag = new THREE.Mesh(box(0.055, 0.12, 0.07), WEAPON_MAT.metal);
   mag.position.set(0, -0.1, 0.0);
   group.add(mag);
 
   // Sight
-  const sight = new THREE.Mesh(box(0.03, 0.03, 0.07), MAT.barrel);
+  const sight = new THREE.Mesh(box(0.03, 0.03, 0.07), WEAPON_MAT.barrel);
   sight.position.set(0, 0.07, -0.04);
   group.add(sight);
 
@@ -360,51 +455,33 @@ export function buildFPHands() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Animate remote player avatar based on velocity and pose data
+// Animate avatar using AnimationMixer based on player state
 // ─────────────────────────────────────────────────────────────────────────────
-export function animateAvatar(joints, animState, delta) {
-  const { speed, isGrounded, pitch } = animState;
-  const t = animState.time || 0;
-  animState.time = t + delta;
-
-  const walkFreq = 8;
-  const walkAmp = speed > 0.5 ? Math.min(speed / 5, 0.6) : 0;
-
-  const walk = Math.sin(animState.time * walkFreq);
-
-  // Leg swing
-  joints.upperLegR.rotation.x = walk * walkAmp;
-  joints.upperLegL.rotation.x = -walk * walkAmp;
-
-  // Knee bend (lower legs) - clamp to prevent ground clipping
-  joints.lowerLegR.rotation.x = Math.min(Math.abs(walk) * walkAmp * 0.5, 0.8);
-  joints.lowerLegL.rotation.x = Math.min(Math.abs(-walk) * walkAmp * 0.5, 0.8);
-
-  // Arm swing (opposite to legs)
-  joints.upperArmR.rotation.x = THREE.MathUtils.lerp(
-    joints.upperArmR.rotation.x, -walk * walkAmp * 0.6 - 0.2, 0.2
-  );
-  joints.upperArmL.rotation.x = THREE.MathUtils.lerp(
-    joints.upperArmL.rotation.x, walk * walkAmp * 0.6 - 0.2, 0.2
-  );
-
-  // Arms raised to hold gun
-  joints.upperArmR.rotation.x += -0.35;
-  joints.forearmR.rotation.x = -0.35;
-  joints.upperArmL.rotation.x += -0.3;
-  joints.forearmL.rotation.x = -0.3;
-
-  // Head follows vertical aim
-  if (pitch !== undefined) {
-    joints.head.rotation.x = THREE.MathUtils.lerp(joints.head.rotation.x, pitch, 0.15);
+export function animateAvatar(avatarData, animState, delta) {
+  const { animator } = avatarData;
+  if (!animator) return;
+  
+  const { speed, isGrounded } = animState;
+  
+  // Determine animation state
+  let targetAnim = 'idle';
+  
+  if (!isGrounded) {
+    // Jumping or falling
+    targetAnim = animState.velocityY > 0 ? 'jump' : 'fall';
+  } else if (speed > 4.0) {
+    // Sprinting
+    targetAnim = 'run';
+  } else if (speed > 0.1) {
+    // Walking
+    targetAnim = 'walk';
   }
-
-  // Body bob when walking
-  if (joints.torso && walkAmp > 0.05) {
-    joints.torso.position.y = Math.sin(animState.time * walkFreq * 2) * 0.015;
-  } else {
-    joints.torso.position.y = THREE.MathUtils.lerp(joints.torso.position.y, 0, 0.1);
-  }
+  
+  // Play animation with cross-fade
+  animator.play(targetAnim, 0.2);
+  
+  // Update mixer
+  animator.update(delta);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

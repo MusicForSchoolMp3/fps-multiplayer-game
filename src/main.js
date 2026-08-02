@@ -1285,9 +1285,9 @@ function toggleThirdPerson() {
 }
 
 // ── Ensure local body avatar exists (created lazily on first TP) ───────────────
-function ensureLocalBody() {
+async function ensureLocalBody() {
   if (localBodyAvatar) return;
-  const { root, joints } = buildHumanoid(localColorIdx, false);
+  const { root, joints, animator } = await buildHumanoid(localColorIdx, true);
   root.visible = false; // starts hidden (first-person default)
 
   // Add local username label above head
@@ -1303,7 +1303,7 @@ function ensureLocalBody() {
   root.add(hitbox);
 
   scene.add(root);
-  localBodyAvatar = { root, joints, hitbox };
+  localBodyAvatar = { root, joints, animator, hitbox };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1311,21 +1311,21 @@ function ensureLocalBody() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function setupNetworkCallbacks() {
-  net.onInit = (id, players, colorIndex) => {
+  net.onInit = async (id, players, colorIndex) => {
     localColorIdx = colorIndex;
     statusDot.classList.add('connected');
     statusText.textContent = 'Connected';
     for (const [pid, pdata] of Object.entries(players)) {
-      if (pid !== id) spawnRemotePlayer(pid, pdata);
+      if (pid !== id) await spawnRemotePlayer(pid, pdata);
     }
     scores.set(id, { kills: 0, deaths: 0, name: localUsername });
     updateScoreboard();
     // Create local body now we have colorIndex
-    ensureLocalBody();
+    await ensureLocalBody();
   };
 
-  net.onPlayerJoin = (id, data) => {
-    spawnRemotePlayer(id, data);
+  net.onPlayerJoin = async (id, data) => {
+    await spawnRemotePlayer(id, data);
     addKillFeedEntry('', data.username || id.slice(0, 6), '🔌 joined', false);
   };
 
@@ -1426,10 +1426,10 @@ function setupNetworkCallbacks() {
 //  PLAYER SPAWN / REMOVE
 // ══════════════════════════════════════════════════════════════════════════════
 
-function spawnRemotePlayer(id, data) {
+async function spawnRemotePlayer(id, data) {
   if (remotePlayers.has(id)) return;
   const colorIdx = data.colorIndex || 0;
-  const { root, joints } = buildHumanoid(colorIdx, false);
+  const { root, joints, animator } = await buildHumanoid(colorIdx, false);
   root.position.set(data.x || 0, 0, data.z || 0);
   
   // Set initial weapon type
@@ -1451,8 +1451,8 @@ function spawnRemotePlayer(id, data) {
   root.add(hitbox);
 
   scene.add(root);
-  const animState = { time: 0, speed: 0, isGrounded: true, pitch: 0 };
-  remotePlayers.set(id, { root, joints, animState, label, hitbox });
+  const animState = { time: 0, speed: 0, isGrounded: true, pitch: 0, velocityY: 0 };
+  remotePlayers.set(id, { root, joints, animator, animState, label, hitbox });
 
   scores.set(id, { kills: data.kills || 0, deaths: data.deaths || 0, name: uname });
   updateScoreboard();
@@ -1623,7 +1623,8 @@ function gameLoop() {
       localAnimState.speed      = Math.sqrt(controller.velocity.x ** 2 + controller.velocity.z ** 2);
       localAnimState.isGrounded = controller.isGrounded;
       localAnimState.pitch      = controller.pitch;
-      animateAvatar(localBodyAvatar.joints, localAnimState, delta);
+      localAnimState.velocityY  = controller.velocity.y || 0;
+      animateAvatar(localBodyAvatar, localAnimState, delta);
     }
   }
 
@@ -1645,7 +1646,8 @@ function gameLoop() {
     rp.animState.speed      = snap.speed || 0;
     rp.animState.isGrounded = snap.isGrounded;
     rp.animState.pitch      = snap.pitch || 0;
-    animateAvatar(rp.joints, rp.animState, delta);
+    rp.animState.velocityY  = 0; // No velocityY in network snapshot currently
+    animateAvatar(rp, rp.animState, delta);
   }
 
   // ── Decay remote tracers ──────────────────────────────────────────────────
