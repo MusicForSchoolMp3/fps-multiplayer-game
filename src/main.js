@@ -137,6 +137,8 @@ let openingMenu       = false; // Flag to prevent lock screen from showing when 
 let renderer, scene, camera, clock;
 let controller, net, weapon;
 let fpHandsGroup;
+let fpHandsAnimator;
+let fpHandsRoot;
 let localBodyAvatar   = null; // full body for third-person view
 let localAnimState    = { time: 0, speed: 0, isGrounded: true, pitch: 0 };
 let isThirdPerson     = false;
@@ -752,8 +754,10 @@ function startGame() {
   setupNetworkCallbacks();
 
   // ── FP hands ──────────────────────────────────────────────────────────────
-  const fp = buildFPHands();
+  const fp = await buildFPHands();
   fpHandsGroup = fp.group;
+  fpHandsAnimator = fp.animator;
+  fpHandsRoot = fp.root;
   camera.add(fpHandsGroup);
 
   // ── Weapon ────────────────────────────────────────────────────────────────
@@ -1602,6 +1606,22 @@ function gameLoop() {
   // ── Local controller ──────────────────────────────────────────────────────
   if (!isDead) controller.update(delta);
 
+  // ── Update local body avatar (always, not just in third-person) ────────────
+  if (localBodyAvatar && !isDead) {
+    const feetPos = new THREE.Vector3(
+      controller.position.x,
+      controller.position.y - EYE_HEIGHT,
+      controller.position.z
+    );
+    localBodyAvatar.root.position.copy(feetPos);
+    localBodyAvatar.root.rotation.y = controller.yaw + Math.PI;
+    localAnimState.speed      = Math.sqrt(controller.velocity.x ** 2 + controller.velocity.z ** 2);
+    localAnimState.isGrounded = controller.isGrounded;
+    localAnimState.pitch      = controller.pitch;
+    localAnimState.velocityY  = controller.velocity.y || 0;
+    animateAvatar(localBodyAvatar, localAnimState, delta);
+  }
+
   // ── Third-person camera override ──────────────────────────────────────────
   if (isThirdPerson && !isDead) {
     const feetPos = new THREE.Vector3(
@@ -1625,17 +1645,6 @@ function gameLoop() {
 
     camera.position.set(camX, camY, camZ);
     camera.lookAt(target);
-
-    // Drive local body avatar
-    if (localBodyAvatar) {
-      localBodyAvatar.root.position.copy(feetPos);
-      localBodyAvatar.root.rotation.y = controller.yaw + Math.PI;
-      localAnimState.speed      = Math.sqrt(controller.velocity.x ** 2 + controller.velocity.z ** 2);
-      localAnimState.isGrounded = controller.isGrounded;
-      localAnimState.pitch      = controller.pitch;
-      localAnimState.velocityY  = controller.velocity.y || 0;
-      animateAvatar(localBodyAvatar, localAnimState, delta);
-    }
   }
 
   // ── Send movement ─────────────────────────────────────────────────────────
@@ -1646,6 +1655,16 @@ function gameLoop() {
 
   // ── Weapon update ─────────────────────────────────────────────────────────
   if (weapon) weapon.update(delta, controller.isLocked, !isDead);
+
+  // ── Update FP hands animation ───────────────────────────────────────────────
+  if (fpHandsAnimator && !isThirdPerson && !isDead) {
+    const fpAnimState = {
+      speed: Math.sqrt(controller.velocity.x ** 2 + controller.velocity.z ** 2),
+      isGrounded: controller.isGrounded,
+      velocityY: controller.velocity.y || 0
+    };
+    animateAvatar({ animator: fpHandsAnimator }, fpAnimState, delta);
+  }
 
   // ── Interpolate & animate remote players ──────────────────────────────────
   for (const [id, rp] of remotePlayers) {

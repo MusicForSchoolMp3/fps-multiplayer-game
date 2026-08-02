@@ -102,17 +102,17 @@ export class MenuAvatarPreview {
 
   async loadAvatar() {
     try {
-      const { root, joints, weaponAnchor } = await buildHumanoid(0, false);
+      const { root, joints, weaponAnchor, animator } = await buildHumanoid(0, false);
       this.avatarRoot = root;
       this.weaponAnchor = weaponAnchor;
       this.joints = joints;
+      this.animator = animator;
       this.scene.add(root);
 
-      // Pose arms for natural weapon showcase posture (Mixamo bone names)
-      if (joints.rightArm) joints.rightArm.rotation.x = -0.5;
-      if (joints.rightForeArm) joints.rightForeArm.rotation.x = -0.3;
-      if (joints.leftArm) joints.leftArm.rotation.x = -0.4;
-      if (joints.leftForeArm) joints.leftForeArm.rotation.x = -0.25;
+      // Start idle animation
+      if (animator) {
+        animator.play('idle');
+      }
     } catch (err) {
       console.error('Failed to load menu avatar:', err);
     }
@@ -136,6 +136,10 @@ export class MenuAvatarPreview {
 
       if (this.avatarRoot) {
         this.avatarRoot.rotation.y = Math.sin(this.animTime * 0.6) * 0.4 + 0.15;
+      }
+      // Update animator for idle animation
+      if (this.animator) {
+        this.animator.update(dt);
       }
       this.renderer.render(this.scene, this.camera);
       requestAnimationFrame(loop);

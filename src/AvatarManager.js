@@ -413,39 +413,62 @@ export function buildWeaponContainer() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Build first-person hands + weapon (visible only to local player)
+// Uses Mixamo character arms instead of blocky meshes
 // ─────────────────────────────────────────────────────────────────────────────
-export function buildFPHands() {
+export async function buildFPHands() {
+  await loadCharacter();
+  await loadAnimations();
+
+  // Clone character for first-person view
+  const root = characterTemplate.clone();
+  root.name = 'fp-hands-root';
+
+  // Find bones
+  const bones = {
+    rightArm: findBone(root, 'rightArm'),
+    rightForeArm: findBone(root, 'rightForeArm'),
+    rightHand: findBone(root, 'rightHand'),
+    leftArm: findBone(root, 'leftArm'),
+    leftForeArm: findBone(root, 'leftForeArm'),
+    leftHand: findBone(root, 'leftHand'),
+  };
+
+  // Hide everything except arms and hands
+  root.traverse((child) => {
+    if (child.isMesh) {
+      // Keep only arm/hand meshes visible
+      const isArmMesh = child.name.toLowerCase().includes('arm') ||
+                       child.name.toLowerCase().includes('hand') ||
+                       child.name.toLowerCase().includes('forearm');
+      child.visible = isArmMesh;
+    }
+  });
+
+  // Position for first-person view
+  root.position.set(0, 0, 0);
+  root.rotation.set(0, 0, 0);
+
+  // Create weapon socket on right hand
+  const weaponSocket = createWeaponSocket(bones.rightHand);
+  weaponSocket.position.set(0.02, 0.02, 0.05);
+  weaponSocket.rotation.set(0.1, 0, 0);
+
+  // Attach weapon container to socket
+  const weaponGroup = buildWeaponContainer();
+  weaponGroup.name = 'weapon';
+  weaponSocket.add(weaponGroup);
+
+  // Create animator for hands
+  const animator = new AvatarAnimator(root, animationClips);
+  animator.play('idle');
+
+  // Position the entire group for first-person view
   const group = new THREE.Group();
+  group.add(root);
+  root.position.set(0.3, -0.4, -0.6);
+  root.rotation.set(-0.2, 0.2, 0);
 
-  // Right forearm
-  const foreR = new THREE.Mesh(box(0.1, 0.22, 0.1), MAT.localSkin);
-  foreR.position.set(0.2, -0.18, -0.35);
-  foreR.rotation.x = -0.15;
-  group.add(foreR);
-
-  // Left forearm
-  const foreL = new THREE.Mesh(box(0.1, 0.22, 0.1), MAT.localSkin);
-  foreL.position.set(-0.13, -0.2, -0.38);
-  foreL.rotation.x = -0.15;
-  group.add(foreL);
-
-  // Right hand
-  const handR = new THREE.Mesh(box(0.1, 0.09, 0.09), MAT.localSkin);
-  handR.position.set(0.2, -0.28, -0.41);
-  group.add(handR);
-
-  // Left hand
-  const handL = new THREE.Mesh(box(0.1, 0.09, 0.09), MAT.localSkin);
-  handL.position.set(-0.13, -0.3, -0.43);
-  group.add(handL);
-
-  // Weapon
-  const weapon = buildWeaponContainer();
-  weapon.position.set(0.04, -0.26, -0.52);
-  weapon.rotation.set(0.05, 0, 0);
-  group.add(weapon);
-
-  return { group, weapon };
+  return { group, weapon: weaponGroup, animator, root };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
