@@ -1664,6 +1664,21 @@ function gameLoop() {
       const worldPos = new THREE.Vector3();
       localBodyAvatar.root.getWorldPosition(worldPos);
       console.log('World position:', worldPos);
+      // Check distance from camera
+      const distToCamera = camera.position.distanceTo(worldPos);
+      console.log('Distance to camera:', distToCamera);
+      // Check if in camera frustum
+      const frustum = new THREE.Frustum();
+      const projScreenMatrix = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+      frustum.setFromProjectionMatrix(projScreenMatrix);
+      const inFrustum = frustum.intersectsObject(localBodyAvatar.root);
+      console.log('In camera frustum:', inFrustum);
+      // Force frustum culling check off temporarily
+      localBodyAvatar.root.traverse((child) => {
+        if (child.isMesh) {
+          child.frustumCulled = false;
+        }
+      });
     }
   } else {
     // Debug: log why not updating
