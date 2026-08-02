@@ -408,12 +408,6 @@ io.on('connection', async (socket) => {
       dir: data.dir,
     });
 
-    // Broadcast shoot animation trigger
-    socket.broadcast.emit('player_anim', {
-      id: socket.id,
-      anim: 'shoot'
-    });
-
     if (data.hitId && players.has(data.hitId)) {
       const victim = players.get(data.hitId);
       if (victim.isDead) return;
@@ -434,17 +428,6 @@ io.on('connection', async (socket) => {
 
       if (victim.health <= 0) killPlayer(data.hitId, socket.id);
     }
-  });
-
-  socket.on('reload', () => {
-    const player = players.get(socket.id);
-    if (!player || player.isDead) return;
-
-    // Broadcast reload animation trigger
-    socket.broadcast.emit('player_anim', {
-      id: socket.id,
-      anim: 'reload'
-    });
   });
 
   socket.on('ping_req', () => socket.emit('pong_res'));

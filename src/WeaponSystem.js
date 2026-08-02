@@ -27,7 +27,7 @@ const WEAPONS = {
 };
 
 export class WeaponSystem {
-  constructor(camera, scene, net, controller, ui, isThirdPersonRef, localBodyAvatarRef, localAnimStateRef) {
+  constructor(camera, scene, net, controller, ui, isThirdPersonRef, localBodyAvatarRef) {
     this.camera     = camera;
     this.scene      = scene;
     this.net        = net;
@@ -35,7 +35,6 @@ export class WeaponSystem {
     this.ui         = ui;
     this.isThirdPersonRef = isThirdPersonRef;
     this.localBodyAvatarRef = localBodyAvatarRef;
-    this.localAnimStateRef = localAnimStateRef;
     this.fpHandsGroup = null;
 
     // Current weapon
@@ -217,11 +216,6 @@ export class WeaponSystem {
     this.controller.applyRecoil(0.022);
     this._updateUI();
 
-    // Trigger shoot animation
-    if (this.localAnimStateRef) {
-      this.localAnimStateRef().isShooting = true;
-    }
-
     // Calculate shoot origin based on view mode
     let origin, dir;
     
@@ -326,16 +320,6 @@ export class WeaponSystem {
     this.isReloading   = true;
     this._reloadTimer  = config.reloadTime;
     if (this.ui.reloadEl) this.ui.reloadEl.style.display = 'block';
-
-    // Trigger reload animation
-    if (this.localAnimStateRef) {
-      this.localAnimStateRef().isReloading = true;
-    }
-
-    // Emit reload event to server for other players
-    if (this.net && this.net.socket) {
-      this.net.socket.emit('reload');
-    }
   }
 
   _spawnTracer(from, to) {

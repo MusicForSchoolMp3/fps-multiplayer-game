@@ -180,8 +180,6 @@ const ANIMATION_PATHS = {
   run: '/NEW character/Characters animations/ar and sniper RUN (shift).glb',
   jump: '/NEW character/Characters animations/ar and sniper JUMP (jump up).glb',
   fall: '/NEW character/Characters animations/ar and sniper FALL (jump down).glb',
-  shoot: '/NEW character/Characters animations/shoot gun.glb',
-  reload: '/NEW character/Characters animations/reload gun.glb',
 };
 
 let animationClips = {};
@@ -214,14 +212,9 @@ class AvatarAnimator {
     this.clips = clips;
     this.currentAction = null;
     this.currentState = 'idle';
-    this.priorityState = null; // 'shoot' or 'reload' override normal animations
-    this.priorityAction = null;
   }
   
   play(name, fadeDuration = 0.2) {
-    // Priority animations (shoot/reload) override everything
-    if (this.priorityState) return;
-    
     if (this.currentState === name && this.currentAction) return;
     
     const clip = this.clips[name];
@@ -241,44 +234,6 @@ class AvatarAnimator {
     newAction.play();
     this.currentAction = newAction;
     this.currentState = name;
-  }
-  
-  // Force play a priority animation (shoot/reload)
-  forcePlay(name, fadeDuration = 0.1) {
-    const clip = this.clips[name];
-    if (!clip) {
-      console.warn(`Animation not found: ${name}`);
-      return;
-    }
-    
-    const newAction = this.mixer.clipAction(clip);
-    newAction.setLoop(THREE.LoopOnce);
-    newAction.clampWhenFinished = true;
-    
-    if (this.priorityAction) {
-      this.priorityAction.crossFadeTo(newAction, fadeDuration);
-    } else if (this.currentAction) {
-      this.currentAction.crossFadeTo(newAction, fadeDuration);
-    } else {
-      newAction.fadeIn(fadeDuration);
-    }
-    
-    newAction.play();
-    this.priorityAction = newAction;
-    this.priorityState = name;
-    
-    // When animation finishes, return to normal state
-    this.mixer.addEventListener('finished', (e) => {
-      if (e.action === newAction) {
-        this.clearPriority();
-      }
-    });
-  }
-  
-  clearPriority() {
-    this.priorityState = null;
-    this.priorityAction = null;
-    this.currentState = 'idle'; // Will be updated by next animate call
   }
   
   update(delta) {
@@ -361,15 +316,6 @@ export async function buildHumanoid(colorIndex = 0, isLocal = false) {
       child.material = child.material.clone();
     }
   });
-  
-  // Hide body mesh for local player (first-person view)
-  if (isLocal) {
-    root.traverse((child) => {
-      if (child.isMesh) {
-        child.visible = false;
-      }
-    });
-  }
 
   // Create weapon socket on right hand
   const weaponSocket = createWeaponSocket(bones.rightHand);
@@ -541,34 +487,24 @@ export function animateAvatar(avatarData, animState, delta) {
   const { animator } = avatarData;
   if (!animator) return;
   
-  const { speed, isGrounded, isShooting, isReloading } = animState;
+  const { speed, isGrounded } = animState;
   
-  // Priority animations: shoot and reload override everything
-  // Only trigger if not already in priority state
-  if (isShooting && !animator.priorityState) {
-    animator.forcePlay('shoot', 0.1);
-    animState.isShooting = false; // Reset after triggering
-  } else if (isReloading && !animator.priorityState) {
-    animator.forcePlay('reload', 0.1);
-    animState.isReloading = false; // Reset after triggering
-  } else if (!animator.priorityState) {
-    // Normal animations based on movement state (only if not in priority animation)
-    let targetAnim = 'idle';
-    
-    if (!isGrounded) {
-      // Jumping or falling
-      targetAnim = animState.velocityY > 0 ? 'jump' : 'fall';
-    } else if (speed > 4.0) {
-      // Sprinting
-      targetAnim = 'run';
-    } else if (speed > 0.1) {
-      // Walking
-      targetAnim = 'walk';
-    }
-    
-    // Play animation with cross-fade
-    animator.play(targetAnim, 0.2);
+  // Determine animation state
+  let targetAnim = 'idle';
+  
+  if (!isGrounded) {
+    // Jumping or falling
+    targetAnim = animState.velocityY > 0 ? 'jump' : 'fall';
+  } else if (speed > 4.0) {
+    // Sprinting
+    targetAnim = 'run';
+  } else if (speed > 0.1) {
+    // Walking
+    targetAnim = 'walk';
   }
+  
+  // Play animation with cross-fade
+  animator.play(targetAnim, 0.2);
   
   // Update mixer
   animator.update(delta);
