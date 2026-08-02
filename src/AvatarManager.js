@@ -5,6 +5,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 
 // ── Sniper GLB Model Preloader ────────────────────────────────────────────────
 let sniperGlbTemplate = null;
@@ -291,13 +292,9 @@ export async function buildHumanoid(colorIndex = 0, isLocal = false) {
   await loadCharacter();
   await loadAnimations();
   
-  // Clone character template
-  const root = characterTemplate.clone();
+  // Clone character template properly with skeleton rebinding
+  const root = SkeletonUtils.clone(characterTemplate);
   root.name = 'avatar-root';
-  
-  // Log bone hierarchy for debugging
-  console.log('Bone hierarchy:');
-  logBoneHierarchy(root);
   
   // Find bones
   const bones = {
@@ -322,13 +319,9 @@ export async function buildHumanoid(colorIndex = 0, isLocal = false) {
     if (child.isMesh && child.material) {
       // Clone material to avoid affecting other instances
       child.material = child.material.clone();
-      // Apply color tint if needed (optional)
     }
   });
 
-  // Don't hide individual meshes for local player - hide entire root instead
-  // This allows third-person toggle to work correctly
-  
   // Create weapon socket on right hand
   const weaponSocket = createWeaponSocket(bones.rightHand);
   
@@ -419,12 +412,13 @@ export async function buildFPHands() {
   await loadCharacter();
   await loadAnimations();
 
-  // Clone character for first-person view
-  const root = characterTemplate.clone();
+  // Clone character for first-person view properly using SkeletonUtils
+  const root = SkeletonUtils.clone(characterTemplate);
   root.name = 'fp-hands-root';
 
   // Find bones
   const bones = {
+    head: findBone(root, 'head'),
     rightArm: findBone(root, 'rightArm'),
     rightForeArm: findBone(root, 'rightForeArm'),
     rightHand: findBone(root, 'rightHand'),
@@ -433,25 +427,22 @@ export async function buildFPHands() {
     leftHand: findBone(root, 'leftHand'),
   };
 
-  // Hide everything except arms and hands
+  // Ensure character meshes are visible
   root.traverse((child) => {
     if (child.isMesh) {
-      // Keep only arm/hand meshes visible
-      const isArmMesh = child.name.toLowerCase().includes('arm') ||
-                       child.name.toLowerCase().includes('hand') ||
-                       child.name.toLowerCase().includes('forearm');
-      child.visible = isArmMesh;
+      child.visible = true;
+      child.castShadow = true;
+      child.receiveShadow = true;
     }
   });
 
-  // Position for first-person view
-  root.position.set(0, 0, 0);
-  root.rotation.set(0, 0, 0);
+  // Scale down head bone so head geometry doesn't clip/block camera view
+  if (bones.head) {
+    bones.head.scale.set(0.001, 0.001, 0.001);
+  }
 
   // Create weapon socket on right hand
   const weaponSocket = createWeaponSocket(bones.rightHand);
-  weaponSocket.position.set(0.02, 0.02, 0.05);
-  weaponSocket.rotation.set(0.1, 0, 0);
 
   // Attach weapon container to socket
   const weaponGroup = buildWeaponContainer();
@@ -462,11 +453,11 @@ export async function buildFPHands() {
   const animator = new AvatarAnimator(root, animationClips);
   animator.play('idle');
 
-  // Position the entire group for first-person view
+  // Position for first-person view (eyes aligned at camera Y=0)
   const group = new THREE.Group();
   group.add(root);
-  root.position.set(0.3, -0.4, -0.6);
-  root.rotation.set(-0.2, 0.2, 0);
+  root.position.set(0, -1.65, 0);
+  root.rotation.set(0, 0, 0);
 
   return { group, weapon: weaponGroup, animator, root };
 }

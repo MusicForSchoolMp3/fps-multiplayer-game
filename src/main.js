@@ -1648,44 +1648,6 @@ function gameLoop() {
     localAnimState.pitch      = controller.pitch;
     localAnimState.velocityY  = controller.velocity.y || 0;
     animateAvatar(localBodyAvatar, localAnimState, delta);
-
-    // Debug: log position and visibility occasionally
-    if (Math.random() < 0.01) {
-      console.log('Local body - position:', feetPos, 'visible:', localBodyAvatar.root.visible, 'mesh count:', localBodyAvatar.root.children.length);
-      // Check mesh visibility
-      let visibleMeshCount = 0;
-      localBodyAvatar.root.traverse((child) => {
-        if (child.isMesh && child.visible) visibleMeshCount++;
-      });
-      console.log('Visible meshes:', visibleMeshCount);
-      // Check if avatar is in scene
-      console.log('Avatar in scene:', scene.children.includes(localBodyAvatar.root));
-      // Check world position after matrix update
-      const worldPos = new THREE.Vector3();
-      localBodyAvatar.root.getWorldPosition(worldPos);
-      console.log('World position:', worldPos);
-      // Check distance from camera
-      const distToCamera = camera.position.distanceTo(worldPos);
-      console.log('Distance to camera:', distToCamera);
-      // Check camera position
-      console.log('Camera position:', camera.position);
-      // Check isThirdPerson
-      console.log('isThirdPerson:', isThirdPerson);
-      // Count all avatar-root objects in scene
-      let avatarRootCount = 0;
-      scene.traverse((child) => {
-        if (child.name === 'avatar-root') {
-          avatarRootCount++;
-          console.log('Avatar-root found at:', child.position);
-        }
-      });
-      console.log('Total avatar-root objects in scene:', avatarRootCount);
-    }
-  } else {
-    // Debug: log why not updating
-    if (Math.random() < 0.01) {
-      console.log('Not updating local body - localBodyAvatar:', !!localBodyAvatar, 'isDead:', isDead);
-    }
   }
 
   // ── Third-person camera override ──────────────────────────────────────────
@@ -1711,12 +1673,6 @@ function gameLoop() {
 
     camera.position.set(camX, camY, camZ);
     camera.lookAt(target);
-
-    // Debug: log third-person camera target
-    if (Math.random() < 0.01) {
-      console.log('Third-person target:', target);
-      console.log('Third-person camera position:', camera.position);
-    }
   }
 
   // ── Send movement ─────────────────────────────────────────────────────────
