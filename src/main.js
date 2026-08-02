@@ -1296,10 +1296,14 @@ function toggleThirdPerson() {
   isThirdPerson = !isThirdPerson;
 
   // FP hands only visible in first-person
-  if (fpHandsGroup) fpHandsGroup.visible = !isThirdPerson;
+  if (fpHandsGroup) {
+    fpHandsGroup.visible = !isThirdPerson;
+  }
 
   // Local body only visible in third-person
-  if (localBodyAvatar) localBodyAvatar.root.visible = isThirdPerson;
+  if (localBodyAvatar && localBodyAvatar.root) {
+    localBodyAvatar.root.visible = isThirdPerson;
+  }
 
   // Update crosshair opacity
   const ch = document.getElementById('crosshair');

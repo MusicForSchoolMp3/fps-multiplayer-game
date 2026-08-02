@@ -361,6 +361,15 @@ export async function buildHumanoid(colorIndex = 0, isLocal = false) {
       child.material = child.material.clone();
     }
   });
+  
+  // Hide body mesh for local player (first-person view)
+  if (isLocal) {
+    root.traverse((child) => {
+      if (child.isMesh) {
+        child.visible = false;
+      }
+    });
+  }
 
   // Create weapon socket on right hand
   const weaponSocket = createWeaponSocket(bones.rightHand);
@@ -535,14 +544,15 @@ export function animateAvatar(avatarData, animState, delta) {
   const { speed, isGrounded, isShooting, isReloading } = animState;
   
   // Priority animations: shoot and reload override everything
-  if (isShooting) {
+  // Only trigger if not already in priority state
+  if (isShooting && !animator.priorityState) {
     animator.forcePlay('shoot', 0.1);
     animState.isShooting = false; // Reset after triggering
-  } else if (isReloading) {
+  } else if (isReloading && !animator.priorityState) {
     animator.forcePlay('reload', 0.1);
     animState.isReloading = false; // Reset after triggering
-  } else {
-    // Normal animations based on movement state
+  } else if (!animator.priorityState) {
+    // Normal animations based on movement state (only if not in priority animation)
     let targetAnim = 'idle';
     
     if (!isGrounded) {
