@@ -1637,15 +1637,22 @@ function gameLoop() {
     );
     localBodyAvatar.root.position.copy(feetPos);
     localBodyAvatar.root.rotation.y = controller.yaw + Math.PI;
+    localBodyAvatar.root.updateMatrixWorld(); // Force matrix update
     localAnimState.speed      = Math.sqrt(controller.velocity.x ** 2 + controller.velocity.z ** 2);
     localAnimState.isGrounded = controller.isGrounded;
     localAnimState.pitch      = controller.pitch;
     localAnimState.velocityY  = controller.velocity.y || 0;
     animateAvatar(localBodyAvatar, localAnimState, delta);
 
-    // Debug: log position occasionally
+    // Debug: log position and visibility occasionally
     if (Math.random() < 0.01) {
-      console.log('Local body position:', feetPos, 'Controller position:', controller.position);
+      console.log('Local body - position:', feetPos, 'visible:', localBodyAvatar.root.visible, 'mesh count:', localBodyAvatar.root.children.length);
+      // Check mesh visibility
+      let visibleMeshCount = 0;
+      localBodyAvatar.root.traverse((child) => {
+        if (child.isMesh && child.visible) visibleMeshCount++;
+      });
+      console.log('Visible meshes:', visibleMeshCount);
     }
   } else {
     // Debug: log why not updating
