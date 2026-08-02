@@ -1140,12 +1140,16 @@ function setupInput() {
 
   // Click lock screen to enter pointer lock
   lockScreen.addEventListener('click', () => {
-    lockScreen.style.display = 'none';
     if (controller) controller.lock();
+    // Don't hide lock screen yet - wait for pointerlockchange to confirm lock
   });
 
   document.addEventListener('pointerlockchange', () => {
-    if (!document.pointerLockElement && !isDead) {
+    if (document.pointerLockElement) {
+      // Pointer lock acquired - hide lock screen
+      lockScreen.style.display = 'none';
+    } else if (!isDead) {
+      // Pointer lock lost - show lock screen
       // Don't show lock screen if we're opening the menu
       if (openingMenu) return;
       // Only show lock screen if neither menu nor settings are open
