@@ -760,6 +760,9 @@ async function startGame() {
   fpHandsRoot = fp.root;
   camera.add(fpHandsGroup);
 
+  // ── Local body avatar (create immediately, update color later) ─────────────
+  await ensureLocalBody();
+
   // ── Weapon ────────────────────────────────────────────────────────────────
   const weaponNameEl = document.getElementById('weapon-name');
   const ui = { ammoEl, reserveEl, reloadEl, showHitmarker, weaponEl: weaponNameEl };
@@ -1350,8 +1353,10 @@ function setupNetworkCallbacks() {
     }
     scores.set(id, { kills: 0, deaths: 0, name: localUsername });
     updateScoreboard();
-    // Create local body now we have colorIndex
-    await ensureLocalBody();
+    // Local body already created in startGame, just update color if needed
+    if (localBodyAvatar) {
+      console.log('Local body already exists, color index:', colorIndex);
+    }
   };
 
   net.onPlayerJoin = async (id, data) => {
