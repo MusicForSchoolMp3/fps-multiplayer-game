@@ -427,26 +427,58 @@ export async function buildFPHands() {
     leftUpLeg: findBone(root, 'leftUpLeg'),
   };
 
-  // Ensure character meshes are visible
+  // Dedicated FPS View Model: Collapse all non-arm vertices (head, torso, legs) to (0,0,0)
   root.traverse((child) => {
-    if (child.isMesh) {
+    if (child.isSkinnedMesh && child.skeleton && child.geometry) {
       child.visible = true;
       child.castShadow = true;
       child.receiveShadow = true;
+
+      // Find bone indices corresponding to arms, forearms, hands, and fingers
+      const armBoneIndices = new Set();
+      child.skeleton.bones.forEach((bone, idx) => {
+        const bName = bone.name.toLowerCase();
+        if (bName.includes('arm') || bName.includes('hand') || bName.includes('forearm')) {
+          armBoneIndices.add(idx);
+        }
+      });
+
+      const geom = child.geometry;
+      const skinIdx = geom.attributes.skinIndex;
+      const skinWt  = geom.attributes.skinWeight;
+      const posArr  = geom.attributes.position;
+
+      if (skinIdx && skinWt && posArr) {
+        // Clone position attribute to avoid modifying characterTemplate geometry
+        geom.attributes.position = posArr.clone();
+        const pos = geom.attributes.position;
+
+        for (let i = 0; i < pos.count; i++) {
+          const ix = skinIdx.getX(i);
+          const iy = skinIdx.getY(i);
+          const iz = skinIdx.getZ(i);
+          const iw = skinIdx.getW(i);
+
+          const wx = skinWt.getX(i);
+          const wy = skinWt.getY(i);
+          const wz = skinWt.getZ(i);
+          const ww = skinWt.getW(i);
+
+          let armWeight = 0;
+          if (armBoneIndices.has(ix)) armWeight += wx;
+          if (armBoneIndices.has(iy)) armWeight += wy;
+          if (armBoneIndices.has(iz)) armWeight += wz;
+          if (armBoneIndices.has(iw)) armWeight += ww;
+
+          // Collapse non-arm vertices to origin (completely hiding head, neck, torso, legs)
+          if (armWeight < 0.3) {
+            pos.setXYZ(i, 0, 0, 0);
+          }
+        }
+        pos.needsUpdate = true;
+      }
     }
   });
-
-  // Dedicated FPS View Model: Collapse head, torso, spine, hips, and legs to 0
-  const spine2 = root.getObjectByName('mixamorig1:Spine2') || root.getObjectByName('Spine2');
-  const spine1 = root.getObjectByName('mixamorig1:Spine1') || root.getObjectByName('Spine1');
-  const hideBones = [bones.head, spine2, spine1, bones.spine, bones.hips, bones.rightUpLeg, bones.leftUpLeg];
-  hideBones.forEach(b => {
-    if (b) b.scale.set(0.0001, 0.0001, 0.0001);
-  });
-
-  // Restore arm scales so only arms and hands render at full 1.0 scale
-  if (bones.rightArm) bones.rightArm.scale.set(10000, 10000, 10000);
-  if (bones.leftArm) bones.leftArm.scale.set(10000, 10000, 10000);
 
   // Create weapon socket on right hand
   const weaponSocket = createWeaponSocket(bones.rightHand);
