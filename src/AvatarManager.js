@@ -325,15 +325,9 @@ export async function buildHumanoid(colorIndex = 0, isLocal = false) {
       // Apply color tint if needed (optional)
     }
   });
-  
-  // Hide body mesh for local player (first-person)
-  if (isLocal) {
-    root.traverse((child) => {
-      if (child.isMesh) {
-        child.visible = false;
-      }
-    });
-  }
+
+  // Don't hide individual meshes for local player - hide entire root instead
+  // This allows third-person toggle to work correctly
   
   // Create weapon socket on right hand
   const weaponSocket = createWeaponSocket(bones.rightHand);
