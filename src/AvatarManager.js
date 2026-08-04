@@ -327,18 +327,24 @@ class AvatarAnimator {
 }
 
 // ── Weapon Socket System ───────────────────────────────────────────────────────
+// Socket is parented to the Mixamo right-hand bone.
+// The hand bone's local space has its own axes — empirically:
+//   position: slightly forward (+Z) and down (-Y) of the palm centre
+//   rotation: align weapon barrel to point along the hand's forward axis
 function createWeaponSocket(rightHandBone) {
   const socket = new THREE.Object3D();
   socket.name = 'weaponSocket';
-  
+
   if (rightHandBone) {
-    socket.position.set(0.06, 0.12, 0.03);
-    socket.rotation.set(Math.PI / 2, 0, Math.PI / 2);
+    // Offset: push forward along palm, drop slightly below centre
+    socket.position.set(0.0, -0.03, 0.08);
+    // Rotate so the weapon barrel faces forward (-Z in world when arm is extended)
+    socket.rotation.set(0, Math.PI / 2, 0);
     rightHandBone.add(socket);
   } else {
     console.warn('Right hand bone not found for weapon socket');
   }
-  
+
   return socket;
 }
 
@@ -404,12 +410,15 @@ export async function buildHumanoid(colorIndex = 0, isLocal = false) {
 
   // Create weapon socket on right hand
   const weaponSocket = createWeaponSocket(bones.rightHand);
-  
-  // Attach weapon container to socket
+
+  // Attach weapon container to socket.
+  // The procedural weapon parts are sized for the FP view (~0.08–0.4 units).
+  // The full body is 1.7 units tall, so we scale up so the gun looks right.
   const weaponGroup = buildWeaponContainer();
   weaponGroup.name = 'weapon';
+  weaponGroup.scale.setScalar(2.2); // make gun visible at body scale
   weaponSocket.add(weaponGroup);
-  
+
   // Create animator
   const animator = new AvatarAnimator(root, animationClips);
   animator.play('idle');
@@ -611,9 +620,10 @@ export function animateAvatar(avatarData, animState, delta) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Create a floating username label (Sprite, auto-billboards toward camera).
 // Caller should set sprite.position.y = ~2.0 relative to avatar root.
+// Pass kills >= 0 to show a kill-count badge next to the name.
 // ─────────────────────────────────────────────────────────────────────────────
-export function createUsernameLabel(username) {
-  const W = 320, H = 72;
+export function createUsernameLabel(username, kills = -1) {
+  const W = 380, H = 72;
   const canvas = document.createElement('canvas');
   canvas.width  = W;
   canvas.height = H;
@@ -621,43 +631,105 @@ export function createUsernameLabel(username) {
 
   // Background pill
   ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-  _roundRect(ctx, 6, 6, W - 12, H - 12, 12);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.70)';
+  _roundRect(ctx, 6, 6, W - 12, H - 12, 14);
   ctx.fill();
 
   // Thin accent border
-  ctx.strokeStyle = 'rgba(255,140,60,0.5)';
+  ctx.strokeStyle = 'rgba(255,140,60,0.55)';
   ctx.lineWidth = 1.5;
-  _roundRect(ctx, 6, 6, W - 12, H - 12, 12);
+  _roundRect(ctx, 6, 6, W - 12, H - 12, 14);
   ctx.stroke();
 
-  // Username text
-  ctx.fillStyle = '#ffffff';
-  ctx.font      = 'bold 28px Arial, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.shadowColor  = 'rgba(255,100,0,0.4)';
-  ctx.shadowBlur   = 8;
-  // Clamp long names visually
-  let text = username;
-  if (ctx.measureText(text).width > W - 28) {
-    while (ctx.measureText(text + '…').width > W - 28 && text.length > 1) {
-      text = text.slice(0, -1);
+  if (kills >= 0) {
+    // ── Kill badge on the right ──────────────────────────────────────────────
+    const badgeW = 68;
+    const badgeX = W - badgeW - 10;
+
+    // Gold badge background
+    ctx.fillStyle = 'rgba(255, 185, 0, 0.22)';
+    _roundRect(ctx, badgeX, 10, badgeW, H - 20, 8);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,185,0,0.65)';
+    ctx.lineWidth = 1.2;
+    _roundRect(ctx, badgeX, 10, badgeW, H - 20, 8);
+    ctx.stroke();
+
+    // Star + count
+    ctx.fillStyle = '#ffd700';
+    ctx.font      = 'bold 22px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor  = 'rgba(255,200,0,0.6)';
+    ctx.shadowBlur   = 6;
+    ctx.fillText(`★${kills}`, badgeX + badgeW / 2, H / 2);
+
+    // Username text (left portion)
+    ctx.shadowColor  = 'rgba(255,100,0,0.4)';
+    ctx.shadowBlur   = 8;
+    ctx.fillStyle = '#ffffff';
+    ctx.font      = 'bold 28px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    const nameAreaW = badgeX - 10;
+    let text = username;
+    if (ctx.measureText(text).width > nameAreaW - 16) {
+      while (ctx.measureText(text + '…').width > nameAreaW - 16 && text.length > 1) {
+        text = text.slice(0, -1);
+      }
+      text += '…';
     }
-    text += '…';
+    ctx.fillText(text, nameAreaW / 2 + 6, H / 2);
+  } else {
+    // ── Name only (no badge) ─────────────────────────────────────────────────
+    ctx.fillStyle = '#ffffff';
+    ctx.font      = 'bold 28px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor  = 'rgba(255,100,0,0.4)';
+    ctx.shadowBlur   = 8;
+    let text = username;
+    if (ctx.measureText(text).width > W - 28) {
+      while (ctx.measureText(text + '…').width > W - 28 && text.length > 1) {
+        text = text.slice(0, -1);
+      }
+      text += '…';
+    }
+    ctx.fillText(text, W / 2, H / 2);
   }
-  ctx.fillText(text, W / 2, H / 2);
 
   const texture  = new THREE.CanvasTexture(canvas);
   const material = new THREE.SpriteMaterial({
     map: texture,
     transparent: true,
-    depthTest: false,   // always visible through geometry
+    depthTest: false,
     sizeAttenuation: true,
   });
   const sprite = new THREE.Sprite(material);
-  sprite.scale.set(2.2, 0.5, 1);
+  sprite.scale.set(2.4, 0.54, 1);
   return sprite;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rebuild an existing username-label sprite texture in-place.
+// Call this whenever a player's kill count changes.
+// ─────────────────────────────────────────────────────────────────────────────
+export function updateUsernameLabel(sprite, username, kills = 0) {
+  if (!sprite || !sprite.material) return;
+
+  const W = 380, H = 72;
+  const canvas = document.createElement('canvas');
+  canvas.width  = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // Reuse createUsernameLabel's drawing logic via a temporary sprite
+  const tmp = createUsernameLabel(username, kills);
+  // Swap the texture
+  const oldMap = sprite.material.map;
+  sprite.material.map = tmp.material.map;
+  sprite.material.needsUpdate = true;
+  if (oldMap) oldMap.dispose();
+  tmp.material.dispose();
 }
 
 function _roundRect(ctx, x, y, w, h, r) {
