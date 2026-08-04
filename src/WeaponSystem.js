@@ -47,6 +47,10 @@ export class WeaponSystem {
     this._mouseDown   = false;
     this._rightMouseDown = false;
 
+    // Animation event callbacks — set these from outside (e.g. main.js)
+    this.onShoot  = null; // () => void — called each time a bullet is fired
+    this.onReload = null; // () => void — called when a reload begins
+
     // Zoom state
     this.isZoomed = false;
     this.baseFov = camera.fov;
@@ -216,6 +220,9 @@ export class WeaponSystem {
     this.controller.applyRecoil(0.022);
     this._updateUI();
 
+    // Notify animation system
+    if (this.onShoot) this.onShoot();
+
     // Calculate shoot origin based on view mode
     let origin, dir;
     
@@ -320,6 +327,9 @@ export class WeaponSystem {
     this.isReloading   = true;
     this._reloadTimer  = config.reloadTime;
     if (this.ui.reloadEl) this.ui.reloadEl.style.display = 'block';
+
+    // Notify animation system
+    if (this.onReload) this.onReload();
   }
 
   _spawnTracer(from, to) {

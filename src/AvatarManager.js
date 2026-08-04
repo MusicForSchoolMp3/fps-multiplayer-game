@@ -175,12 +175,17 @@ function logBoneHierarchy(model, indent = 0) {
 
 // ── Animation Loading System ─────────────────────────────────────────────────────
 const ANIMATION_PATHS = {
-  idle: '/NEW character/Characters animations/ar and sniper IDLE.glb',
-  walk: '/NEW character/Characters animations/ar and sniper WALK.glb',
-  run: '/NEW character/Characters animations/ar and sniper RUN (shift).glb',
-  jump: '/NEW character/Characters animations/ar and sniper JUMP (jump up).glb',
-  fall: '/NEW character/Characters animations/ar and sniper FALL (jump down).glb',
+  idle:   '/NEW character/Characters animations/ar and sniper IDLE.glb',
+  walk:   '/NEW character/Characters animations/ar and sniper WALK.glb',
+  run:    '/NEW character/Characters animations/ar and sniper RUN (shift).glb',
+  jump:   '/NEW character/Characters animations/ar and sniper JUMP (jump up).glb',
+  fall:   '/NEW character/Characters animations/ar and sniper FALL (jump down).glb',
+  reload: '/NEW character/Characters animations/reload gun.glb',
+  shoot:  '/NEW character/Characters animations/shoot gun.glb',
 };
+
+// One-shot animations that play once and return to base state
+const ONE_SHOT_ANIMS = new Set(['reload', 'shoot']);
 
 let animationClips = {};
 let animationsLoaded = false;
@@ -194,9 +199,13 @@ async function loadAnimations() {
       loader.load(path, (gltf) => {
         if (gltf.animations && gltf.animations.length > 0) {
           animationClips[name] = gltf.animations[0];
+          console.log(`Loaded animation: ${name} (${gltf.animations[0].duration.toFixed(2)}s)`);
         }
         resolve();
-      }, undefined, () => resolve()); // Continue on error
+      }, undefined, (err) => {
+        console.warn(`Failed to load animation: ${name}`, err);
+        resolve();
+      });
     });
   });
   
@@ -210,32 +219,108 @@ class AvatarAnimator {
   constructor(model, clips) {
     this.mixer = new THREE.AnimationMixer(model);
     this.clips = clips;
+
+    // ── Base layer: looping locomotion/state anims ──────────────────────────
     this.currentAction = null;
-    this.currentState = 'idle';
+    this.currentState  = null; // start null so first play() always activates
+
+    // ── Override layer: high-priority one-shot anims (shoot, reload) ────────
+    this._overrideAction = null;
+    this._overrideFinishHandler = null;
   }
-  
+
+  // ── Play a looping base-state animation (idle/walk/run/jump/fall) ────────
   play(name, fadeDuration = 0.2) {
+    // Don't interrupt base layer if same state already playing
     if (this.currentState === name && this.currentAction) return;
-    
+
     const clip = this.clips[name];
     if (!clip) {
       console.warn(`Animation not found: ${name}`);
       return;
     }
-    
+
     const newAction = this.mixer.clipAction(clip);
-    
-    if (this.currentAction) {
-      this.currentAction.crossFadeTo(newAction, fadeDuration);
-    } else {
+
+    // Ensure the action loops indefinitely and is reset to a clean state
+    newAction.loop = THREE.LoopRepeat;
+    newAction.clampWhenFinished = false;
+    newAction.repetitions = Infinity;
+
+    // Only reset time if we are transitioning from a different state
+    // (avoids a pop when re-enabling the same action)
+    if (this.currentAction !== newAction) {
+      newAction.reset();
+      newAction.setEffectiveTimeScale(1);
+      newAction.setEffectiveWeight(1);
+    }
+
+    if (this.currentAction && this.currentAction !== newAction) {
+      this.currentAction.crossFadeTo(newAction, fadeDuration, true);
+    } else if (!this.currentAction) {
       newAction.fadeIn(fadeDuration);
     }
-    
+
     newAction.play();
     this.currentAction = newAction;
-    this.currentState = name;
+    this.currentState  = name;
   }
-  
+
+  // ── Trigger a one-shot override animation (shoot / reload) ───────────────
+  // The override plays at full weight over the base layer, then fades out.
+  triggerOverride(name, fadeDuration = 0.1) {
+    const clip = this.clips[name];
+    if (!clip) {
+      console.warn(`Override animation not found: ${name}`);
+      return;
+    }
+
+    // If the same override is already running, just restart it
+    if (this._overrideAction && this._overrideAction.isRunning()) {
+      // For shoot: restart from beginning (rapid fire feel)
+      if (name === 'shoot') {
+        this._overrideAction.reset();
+        this._overrideAction.play();
+        return;
+      }
+      // For reload: don't interrupt a running reload
+      return;
+    }
+
+    // Clean up any previous finished override
+    if (this._overrideFinishHandler) {
+      this.mixer.removeEventListener('finished', this._overrideFinishHandler);
+      this._overrideFinishHandler = null;
+    }
+
+    const action = this.mixer.clipAction(clip);
+    action.reset();
+    action.loop = THREE.LoopOnce;
+    action.clampWhenFinished = false;
+    action.setEffectiveTimeScale(1);
+    action.setEffectiveWeight(1);
+    action.fadeIn(fadeDuration);
+    action.play();
+
+    this._overrideAction = action;
+
+    // When the override finishes, fade it out so base layer resumes cleanly
+    this._overrideFinishHandler = (e) => {
+      if (e.action === action) {
+        action.fadeOut(0.2);
+        this._overrideAction = null;
+        this.mixer.removeEventListener('finished', this._overrideFinishHandler);
+        this._overrideFinishHandler = null;
+      }
+    };
+    this.mixer.addEventListener('finished', this._overrideFinishHandler);
+  }
+
+  // ── Returns true while a one-shot override is still playing ─────────────
+  isOverridePlaying() {
+    return this._overrideAction !== null && this._overrideAction.isRunning();
+  }
+
   update(delta) {
     this.mixer.update(delta);
   }
@@ -481,20 +566,33 @@ export function buildFPHands() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Animate avatar using AnimationMixer based on player state
+// Animate avatar using AnimationMixer based on player state.
+// animState shape:
+//   { speed, isGrounded, velocityY, isShooting?, isReloading? }
 // ─────────────────────────────────────────────────────────────────────────────
 export function animateAvatar(avatarData, animState, delta) {
   const { animator } = avatarData;
   if (!animator) return;
-  
+
   const { speed, isGrounded } = animState;
-  
-  // Determine animation state
+
+  // ── High-priority one-shot overrides (shoot / reload) ────────────────────
+  // These trigger once per event; the animator handles fading them out.
+  if (animState.triggerShoot) {
+    animator.triggerOverride?.('shoot', 0.05);
+    animState.triggerShoot = false;
+  }
+  if (animState.triggerReload) {
+    animator.triggerOverride?.('reload', 0.1);
+    animState.triggerReload = false;
+  }
+
+  // ── Base looping animation (locomotion / stance) ─────────────────────────
   let targetAnim = 'idle';
-  
+
   if (!isGrounded) {
-    // Jumping or falling
-    targetAnim = animState.velocityY > 0 ? 'jump' : 'fall';
+    // In the air — jump on the way up, fall on the way down
+    targetAnim = (animState.velocityY ?? 0) > 0 ? 'jump' : 'fall';
   } else if (speed > 4.0) {
     // Sprinting
     targetAnim = 'run';
@@ -502,11 +600,11 @@ export function animateAvatar(avatarData, animState, delta) {
     // Walking
     targetAnim = 'walk';
   }
-  
-  // Play animation with cross-fade
+
+  // Play looping base animation with cross-fade
   animator.play(targetAnim, 0.2);
-  
-  // Update mixer
+
+  // Advance the mixer
   animator.update(delta);
 }
 

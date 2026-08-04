@@ -774,6 +774,10 @@ async function startGame() {
   weapon.remotePlayers = remotePlayers;
   weapon.setMapMeshes(mapMeshes);
 
+  // ── Hook weapon events into the body-avatar animation system ─────────────
+  weapon.onShoot  = () => { localAnimState.triggerShoot  = true; };
+  weapon.onReload = () => { localAnimState.triggerReload = true; };
+
   // ── Setup weapon buttons after weaponSystem is created ───────────────────────
   const weaponArBtn = document.getElementById('weapon-ar-btn');
   const weaponSniperBtn = document.getElementById('weapon-sniper-btn');
