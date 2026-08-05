@@ -1716,7 +1716,7 @@ function gameLoop() {
   for (const [id, rp] of remotePlayers) {
     const snap = net.getInterpolated(id);
     if (!snap) continue;
-    rp.root.position.set(snap.x, 0, snap.z);
+    rp.root.position.set(snap.x, snap.y, snap.z); // Use actual Y position for jump height visibility
     rp.root.rotation.y      = snap.yaw + Math.PI;
     rp.animState.speed      = snap.speed || 0;
     rp.animState.isGrounded = snap.isGrounded;

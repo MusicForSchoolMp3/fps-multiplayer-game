@@ -205,17 +205,18 @@ async function kickPlayerForCheating(socket, player, reason) {
   console.log(`[Anticheat] Kicking ${player.username} for: ${reason}`);
   
   // Set ban status
+  const banExpiry = Date.now() + ANTICHEAT_BAN_DURATION;
   player.isBanned = true;
-  player.banExpiry = Date.now() + ANTICHEAT_BAN_DURATION;
+  player.banExpiry = banExpiry;
   
   // Notify player
   socket.emit('anticheat_kick', {
     reason: reason,
     duration: ANTICHEAT_BAN_DURATION / 1000, // seconds
-    expiry: new Date(player.banExpiry).toISOString()
+    expiry: new Date(banExpiry).toISOString()
   });
   
-  // Add warning to database if available
+  // Add warning and ban to database if available
   if (accountsCollection) {
     try {
       await accountsCollection.updateOne(
@@ -224,11 +225,13 @@ async function kickPlayerForCheating(socket, player, reason) {
           $inc: { anticheatWarnings: 1 },
           $set: { 
             lastAnticheatWarning: new Date(),
-            lastAnticheatReason: reason
+            lastAnticheatReason: reason,
+            isBanned: true,
+            banExpiry: new Date(banExpiry)
           }
         }
       );
-      console.log(`[Anticheat] Added warning to database for ${player.username}`);
+      console.log(`[Anticheat] Added warning and ban to database for ${player.username} until ${new Date(banExpiry).toISOString()}`);
     } catch (error) {
       console.error(`[Anticheat] Failed to update database warning: ${error}`);
     }
@@ -544,6 +547,30 @@ io.on('connection', async (socket) => {
           console.log(`[-] Rejected connection: account not found for ${username}`);
           socket.disconnect();
           return;
+        }
+        
+        // Check if account is currently banned
+        if (account.isBanned && account.banExpiry) {
+          const banExpiry = new Date(account.banExpiry);
+          const now = new Date();
+          if (now < banExpiry) {
+            const remainingTime = Math.ceil((banExpiry - now) / 1000);
+            console.log(`[-] Rejected connection: ${username} is banned for ${remainingTime} more seconds`);
+            socket.emit('anticheat_kick', {
+              reason: 'You are currently banned for anticheat violations',
+              duration: remainingTime,
+              expiry: banExpiry.toISOString()
+            });
+            socket.disconnect();
+            return;
+          } else {
+            // Ban has expired, clear it
+            await accountsCollection.updateOne(
+              { username },
+              { $set: { isBanned: false, banExpiry: null } }
+            );
+            console.log(`[+] Ban expired for ${username}, cleared database ban`);
+          }
         }
       }
     } catch (error) {
