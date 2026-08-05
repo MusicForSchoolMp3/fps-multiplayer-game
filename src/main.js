@@ -1171,6 +1171,7 @@ function setupCharacterPreviewAndSkins() {
         return;
       }
       
+      console.log(`Equipping skin: ${skinsSelectedSkinId} for weapon: ${skinsCurrentWeapon}`);
       setEquippedSkin(skinsCurrentWeapon, skinsSelectedSkinId);
       renderSkinsList(skinsCurrentWeapon);
 
@@ -1181,18 +1182,21 @@ function setupCharacterPreviewAndSkins() {
         if (fpHandsGroup) {
           const weaponContainer = fpHandsGroup.children.find(c => c.name === 'weapon');
           if (weaponContainer) {
+            console.log('Updating FP hands weapon skin');
             updateWeaponSkin(weaponContainer, skinsCurrentWeapon, skinsSelectedSkinId);
+            weaponContainer.visible = true;
           }
         }
         // Also update local body avatar weapon
         if (localBodyAvatar && localBodyAvatar.root) {
-          const weaponAnchor = localBodyAvatar.root.children.find(c => c.name === 'weapon-anchor');
-          if (weaponAnchor) {
-            const weaponContainer = weaponAnchor.children.find(c => c.name === 'weapon-container');
-            if (weaponContainer) {
-              updateWeaponSkin(weaponContainer, skinsCurrentWeapon, skinsSelectedSkinId);
+          console.log('Updating local body avatar weapon skin');
+          localBodyAvatar.root.traverse((obj) => {
+            if (obj.name === 'weapon' || obj.name === 'weapon-container') {
+              console.log('Found weapon container in local body, updating skin');
+              updateWeaponSkin(obj, skinsCurrentWeapon, skinsSelectedSkinId);
+              obj.visible = true;
             }
-          }
+          });
         }
       }
 

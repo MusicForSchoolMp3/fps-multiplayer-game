@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { SKINS_CONFIG } from './SkinManager.js';
 
 // ── Sniper GLB Model Preloader ────────────────────────────────────────────────
 const sniperGlbTemplates = {}; // Store multiple sniper models by skin ID
@@ -13,9 +14,15 @@ const sniperCallbacks = {}; // Callbacks for each skin
 const sniperModelGroups = {}; // Registry of sniper-model groups waiting for GLB by skin
 
 export function loadSniperModel(skinId = 'sniper_midnight', onLoad) {
-  const url = skinId === 'sniper_testing' 
-    ? '/sniper skins GLB/Meshy_AI_Super_Sniper_0805114143_texture.glb'
-    : '/sniper skins GLB/Meshy_AI_Midnight_Precision_Ri_0801152731_generate.glb';
+  // Look up the skin URL from the configuration
+  const skinConfig = SKINS_CONFIG.sniper?.find(s => s.id === skinId);
+  if (!skinConfig || skinConfig.type !== 'glb') {
+    console.error(`Invalid or non-GLB skin ID: ${skinId}`);
+    if (onLoad) onLoad(null);
+    return;
+  }
+  
+  const url = skinConfig.url;
 
   if (sniperGlbTemplates[skinId]) {
     if (onLoad) onLoad(sniperGlbTemplates[skinId].clone());
@@ -44,17 +51,12 @@ export function loadSniperModel(skinId = 'sniper_midnight', onLoad) {
       const pivot = new THREE.Group();
       pivot.name = 'sniper-glb-pivot';
 
-      const sniperMat = new THREE.MeshStandardMaterial({
-        color: 0x1a1e24,
-        metalness: 0.85,
-        roughness: 0.25,
-      });
-
+      // Preserve original materials from the GLB model
       model.traverse((child) => {
         if (child.isMesh) {
           child.castShadow = true;
           child.receiveShadow = true;
-          child.material = sniperMat;
+          // Keep the original material - don't override it
         }
       });
 
@@ -93,8 +95,9 @@ export function loadSniperModel(skinId = 'sniper_midnight', onLoad) {
   );
 }
 
-// Trigger early preload for default sniper
+// Trigger early preload for default sniper and testing skin
 loadSniperModel('sniper_midnight');
+loadSniperModel('sniper_testing');
 
 export function setWeaponType(container, type) {
   if (!container) return;
@@ -356,6 +359,13 @@ function createWeaponSocket(rightHandBone) {
     // Rotate so the weapon barrel faces forward (-Z in world when arm is extended)
     socket.rotation.set(0, Math.PI / 2, 0);
     rightHandBone.add(socket);
+    
+    // Make sure the right hand bone and its parent chain are visible
+    let parent = rightHandBone;
+    while (parent) {
+      parent.visible = true;
+      parent = parent.parent;
+    }
   } else {
     console.warn('Right hand bone not found for weapon socket');
   }
@@ -425,6 +435,7 @@ export async function buildHumanoid(colorIndex = 0, isLocal = false) {
 
   // Create weapon socket on right hand
   const weaponSocket = createWeaponSocket(bones.rightHand);
+  weaponSocket.visible = true; // Make sure socket is visible
 
   // Attach weapon container to socket.
   // The procedural weapon parts are sized for the FP view (~0.08–0.4 units).
@@ -435,8 +446,10 @@ export async function buildHumanoid(colorIndex = 0, isLocal = false) {
   weaponGroup.visible = true; // Ensure weapon is visible
   weaponSocket.add(weaponGroup);
   
-  // Make sure the weapon socket is visible
-  weaponSocket.visible = true;
+  // Ensure all weapon children are visible
+  weaponGroup.traverse((child) => {
+    child.visible = true;
+  });
 
   // Create animator
   const animator = new AvatarAnimator(root, animationClips);
@@ -521,6 +534,8 @@ export function updateWeaponSkin(container, weaponType, skinId) {
   const sniperGroup = container.children.find(child => child.name === 'sniper-model');
   if (!sniperGroup) return;
 
+  console.log(`Updating weapon skin to: ${skinId}`);
+
   // Remove old model
   while (sniperGroup.children.length > 0) {
     sniperGroup.remove(sniperGroup.children[0]);
@@ -528,15 +543,22 @@ export function updateWeaponSkin(container, weaponType, skinId) {
 
   // Load and add new model
   if (sniperGlbTemplates[skinId]) {
+    console.log(`Using cached template for ${skinId}`);
     sniperGroup.add(sniperGlbTemplates[skinId].clone());
   } else {
+    console.log(`Loading new template for ${skinId}`);
     // Load the new skin
     loadSniperModel(skinId, (model) => {
+      console.log(`Loaded model for ${skinId}, adding to sniper group`);
       sniperGroup.add(model);
     });
   }
   
   sniperGroup.userData.skinId = skinId;
+  
+  // Force visibility update
+  sniperGroup.visible = true;
+  container.visible = true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -555,9 +577,11 @@ export function buildFPHands() {
   // ── Weapon container (centered, no arms) ──────────────────────────────────
   const weaponGroup = buildWeaponContainer();
   weaponGroup.name = 'weapon';
+  weaponGroup.userData.skinId = 'sniper_midnight'; // Default skin
   // Position weapon in lower-right area, angled to not block view
   weaponGroup.position.set(0.25, -0.25, -0.5);
   weaponGroup.rotation.set(0.1, -0.2, 0.05);
+  weaponGroup.visible = true; // Ensure weapon is visible
   group.add(weaponGroup);
 
   // ── Dummy animator (no mixer needed — this model has no rig) ──────────────
