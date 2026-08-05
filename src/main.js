@@ -56,6 +56,11 @@ const UPDATE_LOG = [
       'Added weapon damage validation anticheat',
       'Added fire rate validation anticheat',
       'Added reload time validation anticheat',
+      'Fixed weapon switching ammo persistence to prevent abuse',
+      {
+        text: 'Note to Jack Dongas: Any attempt to hack in my game will not go unseen, i added an anticheat because of you.',
+        bold: true
+      }
     ]
   }
 ];
@@ -69,9 +74,12 @@ function renderUpdateLog(containerId) {
     html += `<div class="update-entry">
       <div class="update-date">${entry.date}</div>`;
     for (const item of entry.items) {
+      const itemText = typeof item === 'string' ? item : item.text;
+      const isBold = typeof item === 'object' && item.bold;
+      const textStyle = isBold ? 'font-weight: bold; color: #ff4444;' : '';
       html += `<div class="update-item">
         <span class="update-bullet">•</span>
-        <span>${item}</span>
+        <span style="${textStyle}">${itemText}</span>
       </div>`;
     }
     html += `</div>`;

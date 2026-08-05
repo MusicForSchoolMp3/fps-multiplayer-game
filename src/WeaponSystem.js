@@ -39,6 +39,13 @@ export class WeaponSystem {
 
     // Current weapon
     this.currentWeapon = 'ar';
+    
+    // Store ammo state for each weapon to prevent abuse
+    this.weaponStates = {
+      ar: { ammo: 30, reserve: 90 },
+      sniper: { ammo: 1, reserve: 10 }
+    };
+    
     this._loadWeapon('ar');
 
     this.isReloading = false;
@@ -88,8 +95,10 @@ export class WeaponSystem {
 
   _loadWeapon(weaponKey) {
     const config = WEAPONS[weaponKey];
-    this.ammo = config.maxAmmo;
-    this.reserve = config.reserveMax;
+    const savedState = this.weaponStates[weaponKey] || { ammo: config.maxAmmo, reserve: config.reserveMax };
+    
+    this.ammo = savedState.ammo;
+    this.reserve = savedState.reserve;
     this.reloadTime = config.reloadTime;
     this.fireRate = config.fireRate;
     this.damage = config.damage;
@@ -98,6 +107,13 @@ export class WeaponSystem {
 
   switchWeapon(weaponKey) {
     if (this.currentWeapon === weaponKey && this._weaponInitialized) return;
+    
+    // Save current weapon's ammo state before switching
+    this.weaponStates[this.currentWeapon] = {
+      ammo: this.ammo,
+      reserve: this.reserve
+    };
+    
     this.currentWeapon = weaponKey;
     this._weaponInitialized = true;
     this._loadWeapon(weaponKey);
@@ -113,8 +129,23 @@ export class WeaponSystem {
   }
 
   addAmmo(amount) {
+    // Add ammo to current weapon's reserve
     this.reserve = Math.min(this.reserve + amount, WEAPONS[this.currentWeapon].reserveMax);
+    
+    // Also add ammo to the other weapon's reserve to prevent switching abuse
+    const otherWeapon = this.currentWeapon === 'ar' ? 'sniper' : 'ar';
+    this.weaponStates[otherWeapon].reserve = Math.min(
+      this.weaponStates[otherWeapon].reserve + amount,
+      WEAPONS[otherWeapon].reserveMax
+    );
+    
     this._updateUI();
+    
+    // Update weapon state
+    this.weaponStates[this.currentWeapon] = {
+      ammo: this.ammo,
+      reserve: this.reserve
+    };
   }
 
   setMapMeshes(meshes) {
@@ -149,6 +180,12 @@ export class WeaponSystem {
       this.isReloading = false;
       if (this.ui.reloadEl) this.ui.reloadEl.style.display = 'none';
       this._updateUI();
+      
+      // Update weapon state
+      this.weaponStates[this.currentWeapon] = {
+        ammo: this.ammo,
+        reserve: this.reserve
+      };
       
       // Send reload completion event to server for anticheat validation
       if (this.net && this.net.socket) {
@@ -224,6 +261,12 @@ export class WeaponSystem {
     this._fireTimer = this.fireRate;
     this.controller.applyRecoil(0.022);
     this._updateUI();
+    
+    // Update weapon state
+    this.weaponStates[this.currentWeapon] = {
+      ammo: this.ammo,
+      reserve: this.reserve
+    };
 
     // Notify animation system
     if (this.onShoot) this.onShoot();
