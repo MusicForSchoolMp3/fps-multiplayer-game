@@ -12,7 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const PORT = process.env.PORT || 3001;
-const TICK_MS = 1000 / 30;
+const TICK_MS = 1000 / 18; // Reduced from 30Hz to 18Hz for bandwidth optimization
 const MAX_HP = 100;
 const RESPAWN_S = 3;
 
@@ -109,6 +109,16 @@ function createPlayer(socket, username) {
     isDead: false,
     lastSeen: Date.now(),
     currentWeapon: 'ar',
+    // Previous state for delta compression
+    _prev: {
+      x: spawn.x, y: spawn.y, z: spawn.z,
+      yaw: 0, pitch: 0, speed: 0,
+      isGrounded: true,
+      health: MAX_HP,
+      isDead: false,
+      currentWeapon: 'ar',
+      username: username,
+    },
   };
 }
 
@@ -129,6 +139,77 @@ function sanitize(p) {
 }
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// Quantization functions to reduce bandwidth
+function quantizePosition(val) {
+  // Round to 2 decimal places (1cm precision) - reduces float precision
+  return Math.round(val * 100) / 100;
+}
+
+function quantizeRotation(val) {
+  // Round to 3 decimal places for rotation (better precision needed for smooth gameplay)
+  return Math.round(val * 1000) / 1000;
+}
+
+// Delta compression - only send changed fields
+function createDeltaUpdate(prevState, currentState) {
+  const delta = {};
+  let hasChanges = false;
+
+  // Check position changes
+  if (prevState.x !== currentState.x) {
+    delta.x = quantizePosition(currentState.x);
+    hasChanges = true;
+  }
+  if (prevState.y !== currentState.y) {
+    delta.y = quantizePosition(currentState.y);
+    hasChanges = true;
+  }
+  if (prevState.z !== currentState.z) {
+    delta.z = quantizePosition(currentState.z);
+    hasChanges = true;
+  }
+
+  // Check rotation changes
+  if (prevState.yaw !== currentState.yaw) {
+    delta.yaw = quantizeRotation(currentState.yaw);
+    hasChanges = true;
+  }
+  if (prevState.pitch !== currentState.pitch) {
+    delta.pitch = quantizeRotation(currentState.pitch);
+    hasChanges = true;
+  }
+
+  // Check other state changes
+  if (prevState.speed !== currentState.speed) {
+    delta.speed = currentState.speed;
+    hasChanges = true;
+  }
+  if (prevState.isGrounded !== currentState.isGrounded) {
+    delta.isGrounded = currentState.isGrounded;
+    hasChanges = true;
+  }
+  if (prevState.health !== currentState.health) {
+    delta.health = currentState.health;
+    hasChanges = true;
+  }
+  if (prevState.isDead !== currentState.isDead) {
+    delta.isDead = currentState.isDead;
+    hasChanges = true;
+  }
+  if (prevState.currentWeapon !== currentState.currentWeapon) {
+    delta.currentWeapon = currentState.currentWeapon;
+    hasChanges = true;
+  }
+
+  // Always include username for new players or if it changed
+  if (!prevState.username || prevState.username !== currentState.username) {
+    delta.username = currentState.username;
+    hasChanges = true;
+  }
+
+  return hasChanges ? delta : null;
+}
 
 const app = express();
 const http = createServer(app);
@@ -310,9 +391,35 @@ app.post('/api/validate-skin', async (req, res) => {
   }
 });
 
-// Static file serving (must be after API routes)
-app.use(express.static('dist'));
-app.use(express.static('.')); // Serve root directory for FBX files
+// Static file serving with proper caching headers (must be after API routes)
+app.use(express.static('dist', {
+  maxAge: '1y', // Cache for 1 year for hashed assets
+  etag: true,
+  lastModified: true,
+  setHeaders: (res, filePath) => {
+    // For hashed assets (Vite build outputs), cache aggressively
+    if (filePath.includes('.')) {
+      const ext = filePath.split('.').pop().toLowerCase();
+      // Cache static assets with long duration
+      if (['js', 'css', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'woff', 'woff2', 'ttf', 'eot'].includes(ext)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+    }
+  }
+}));
+
+app.use(express.static('.', {
+  maxAge: '1h', // Shorter cache for root directory files (FBX models may change)
+  etag: true,
+  lastModified: true,
+  setHeaders: (res, filePath) => {
+    const ext = filePath.split('.').pop().toLowerCase();
+    // Cache model files for 1 day
+    if (['fbx', 'glb', 'gltf'].includes(ext)) {
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+    }
+  }
+}));
 
 io.on('connection', async (socket) => {
   const token = socket.handshake.auth.token;
@@ -517,7 +624,8 @@ async function killPlayer(victimId, killerId) {
 setInterval(() => {
   const state = {};
   for (const [id, p] of players) {
-    state[id] = {
+    // Create delta update with quantization
+    const currentState = {
       x: p.x, y: p.y, z: p.z,
       yaw: p.yaw, pitch: p.pitch,
       speed: p.speed, isGrounded: p.isGrounded,
@@ -525,8 +633,21 @@ setInterval(() => {
       username: p.username,
       currentWeapon: p.currentWeapon || 'ar',
     };
+
+    const delta = createDeltaUpdate(p._prev, currentState);
+    
+    // If there are changes, send delta and update previous state
+    if (delta) {
+      state[id] = delta;
+      // Update previous state for next comparison
+      p._prev = { ...currentState };
+    }
   }
-  io.emit('world_state', state);
+  
+  // Only send if there are updates to send
+  if (Object.keys(state).length > 0) {
+    io.emit('world_state', state);
+  }
 }, TICK_MS);
 
 http.listen(PORT, () => {

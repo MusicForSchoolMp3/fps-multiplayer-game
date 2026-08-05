@@ -4,6 +4,7 @@
 import { io } from 'socket.io-client';
 
 const INTERP_DELAY = 100; // ms of interpolation buffer
+const MOVE_INTERVAL = 1000 / 18; // 18Hz movement update rate (reduced from 20Hz)
 
 export class NetworkManager {
   constructor(serverUrl, token, username) {
@@ -14,6 +15,12 @@ export class NetworkManager {
 
     // Snapshot buffer for each remote player: Map<id, Array<{t, snap}>>
     this._snapshots = new Map();
+    
+    // Full state cache for delta updates
+    this._fullState = new Map();
+    
+    // Last sent snapshot for movement throttling
+    this._lastSentSnapshot = null;
 
     // Callbacks (set by main)
     this.onInit        = null; // (id, players, colorIndex) => {}
@@ -64,19 +71,48 @@ export class NetworkManager {
 
     this.socket.on('player_leave', (id) => {
       this._snapshots.delete(id);
+      this._fullState.delete(id);
       if (this.onPlayerLeave) this.onPlayerLeave(id);
     });
 
     this.socket.on('world_state', (state) => {
       const now = performance.now();
-      for (const [id, snap] of Object.entries(state)) {
+      for (const [id, delta] of Object.entries(state)) {
         if (id === this.localId) continue;
+        
+        // Get or create full state for this player
+        const fullState = this._fullState.get(id) || {
+          x: 0, y: 0, z: 0,
+          yaw: 0, pitch: 0,
+          speed: 0, isGrounded: true,
+          health: 100, isDead: false,
+          username: '',
+          currentWeapon: 'ar',
+        };
+        
+        // Apply delta to full state
+        if (delta.x !== undefined) fullState.x = delta.x;
+        if (delta.y !== undefined) fullState.y = delta.y;
+        if (delta.z !== undefined) fullState.z = delta.z;
+        if (delta.yaw !== undefined) fullState.yaw = delta.yaw;
+        if (delta.pitch !== undefined) fullState.pitch = delta.pitch;
+        if (delta.speed !== undefined) fullState.speed = delta.speed;
+        if (delta.isGrounded !== undefined) fullState.isGrounded = delta.isGrounded;
+        if (delta.health !== undefined) fullState.health = delta.health;
+        if (delta.isDead !== undefined) fullState.isDead = delta.isDead;
+        if (delta.username !== undefined) fullState.username = delta.username;
+        if (delta.currentWeapon !== undefined) fullState.currentWeapon = delta.currentWeapon;
+        
+        // Store updated full state
+        this._fullState.set(id, { ...fullState });
+        
+        // Add to snapshot buffer for interpolation
         if (!this._snapshots.has(id)) this._snapshots.set(id, []);
         const buf = this._snapshots.get(id);
-        buf.push({ t: now, snap });
+        buf.push({ t: now, snap: { ...fullState } });
         // keep buffer trimmed to ~30 entries
         while (buf.length > 30) buf.shift();
-        if (this.onSnapshot) this.onSnapshot(id, snap);
+        if (this.onSnapshot) this.onSnapshot(id, { ...fullState });
       }
     });
 
@@ -115,7 +151,31 @@ export class NetworkManager {
 
   // ── Send local movement ────────────────────────────────────────────────────
   sendMove(snapshot) {
-    this.socket.emit('move', snapshot);
+    // Only send if position or rotation has changed significantly
+    if (!this._lastSentSnapshot) {
+      this._lastSentSnapshot = snapshot;
+      this.socket.emit('move', snapshot);
+      return;
+    }
+
+    const threshold = 0.01; // 1cm threshold for position
+    const angleThreshold = 0.001; // Small threshold for rotation
+    
+    const posChanged = 
+      Math.abs(snapshot.x - this._lastSentSnapshot.x) > threshold ||
+      Math.abs(snapshot.y - this._lastSentSnapshot.y) > threshold ||
+      Math.abs(snapshot.z - this._lastSentSnapshot.z) > threshold;
+    
+    const rotChanged =
+      Math.abs(snapshot.yaw - this._lastSentSnapshot.yaw) > angleThreshold ||
+      Math.abs(snapshot.pitch - this._lastSentSnapshot.pitch) > angleThreshold;
+    
+    const stateChanged = snapshot.isGrounded !== this._lastSentSnapshot.isGrounded;
+
+    if (posChanged || rotChanged || stateChanged) {
+      this._lastSentSnapshot = snapshot;
+      this.socket.emit('move', snapshot);
+    }
   }
 
   // ── Send shoot event ───────────────────────────────────────────────────────

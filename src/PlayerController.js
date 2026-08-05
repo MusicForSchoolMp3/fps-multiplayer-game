@@ -248,13 +248,16 @@ export class PlayerController {
 
   // ── Snapshot for network ────────────────────────────────────────────────────
   getSnapshot() {
+    // Quantize values to reduce bandwidth
+    const quantize = (val, precision) => Math.round(val * precision) / precision;
+    
     return {
-      x: this.position.x,
-      y: this.position.y,
-      z: this.position.z,
-      yaw: this.yaw,
-      pitch: this.pitch,
-      speed: Math.sqrt(this.velocity.x ** 2 + this.velocity.z ** 2),
+      x: quantize(this.position.x, 100), // 2 decimal places (1cm precision)
+      y: quantize(this.position.y, 100),
+      z: quantize(this.position.z, 100),
+      yaw: quantize(this.yaw, 1000), // 3 decimal places for rotation
+      pitch: quantize(this.pitch, 1000),
+      speed: Math.round(Math.sqrt(this.velocity.x ** 2 + this.velocity.z ** 2) * 10) / 10, // 1 decimal place
       isGrounded: this.isGrounded,
     };
   }

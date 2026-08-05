@@ -32,7 +32,7 @@ import {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const SERVER_URL = "https://fps-multiplayer-game.onrender.com";
-const TICK_RATE   = 20;
+const TICK_RATE   = 18; // Reduced from 20 to 18 for bandwidth optimization
 const EYE_HEIGHT  = 1.65;
 
 // ── Update Log ─────────────────────────────────────────────────────────────────
@@ -151,6 +151,7 @@ const remotePlayers   = new Map(); // id → { root, joints, animState, label }
 const _remoteTracers  = [];
 let _lastMoveSent     = 0;
 const MOVE_INTERVAL   = 1000 / TICK_RATE;
+let _lastSentState    = null; // Track last sent state for delta compression
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  AUTH
