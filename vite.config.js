@@ -10,13 +10,7 @@ export default defineConfig({
     outDir: 'dist',
     // Enable content hashing for long-term caching
     sourcemap: false, // Disable sourcemaps in production to reduce bandwidth
-    minify: 'terser', // Use terser for better minification
-    terserOptions: {
-      compress: {
-        drop_console: true, // Remove console logs in production
-        drop_debugger: true,
-      },
-    },
+    minify: 'esbuild', // Use esbuild (default, faster, no extra dependencies)
     rollupOptions: {
       output: {
         // Ensure consistent hashing for better caching
