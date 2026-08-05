@@ -42,6 +42,9 @@ export class PlayerController {
 
     // Map colliders (array of THREE.Box3)
     this.colliders = [];
+    
+    // Ground level (can be updated by map loading)
+    this.groundY = GROUND_Y;
 
     // Recoil
     this.recoilPitch = 0;
@@ -52,6 +55,10 @@ export class PlayerController {
 
   setColliders(boxes) {
     this.colliders = boxes;
+  }
+
+  setGroundY(y) {
+    this.groundY = y;
   }
 
   // ── Public: attach pointer lock ─────────────────────────────────────────────
