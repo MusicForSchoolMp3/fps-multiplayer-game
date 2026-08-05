@@ -1595,6 +1595,7 @@ input:checked + .toggle-slider:before {
 .badge-equipped  { background: rgba(68,255,136,0.2);   color: #44ff88;               border: 1px solid rgba(68,255,136,0.35); }
 .badge-featured  { background: rgba(255,210,0,0.2);    color: #ffd800;               border: 1px solid rgba(255,210,0,0.35); }
 .badge-classic   { background: rgba(140,140,140,0.18); color: #aaaaaa;               border: 1px solid rgba(140,140,140,0.3); }
+.badge-exclusive { background: rgba(255,68,68,0.2);    color: #ff4444;               border: 1px solid rgba(255,68,68,0.35); }
 
 #skins-equip-btn {
   margin-top: auto;

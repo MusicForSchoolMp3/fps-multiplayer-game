@@ -25,6 +25,17 @@ export const SKINS_CONFIG = {
   ],
   sniper: [
     {
+      id: 'sniper_testing',
+      name: 'Testing Skin',
+      type: 'glb',
+      url: '/sniper skins GLB/Meshy_AI_Super_Sniper_0805114143_texture.glb',
+      desc: 'Exclusive experimental sniper skin prototype.',
+      badge: 'EXCLUSIVE',
+      color: '#ff0000',
+      exclusive: true, // This skin is exclusive
+      allowedUsers: ['ben'] // Users who can access this skin
+    },
+    {
       id: 'sniper_midnight',
       name: 'Midnight Precision GLB',
       type: 'glb',
@@ -65,6 +76,18 @@ export function getEquippedSkin(weaponType) {
 export function setEquippedSkin(weaponType, skinId) {
   equippedSkins[weaponType] = skinId;
   localStorage.setItem(`equipped_skin_${weaponType}`, skinId);
+}
+
+// Check if a user has access to an exclusive skin
+export function hasSkinAccess(skinId, username) {
+  const skin = Object.values(SKINS_CONFIG).flat().find(s => s.id === skinId);
+  if (!skin || !skin.exclusive) return true; // Non-exclusive skins are available to everyone
+  return skin.allowedUsers && skin.allowedUsers.includes(username.toLowerCase());
+}
+
+// Filter skins to only show accessible ones for a user
+export function getAccessibleSkins(weaponType, username) {
+  return SKINS_CONFIG[weaponType].filter(skin => hasSkinAccess(skin.id, username));
 }
 
 // ── 3D Character Preview (Left side of main menu) ────────────────────────────

@@ -8,22 +8,29 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 
 // ── Sniper GLB Model Preloader ────────────────────────────────────────────────
-let sniperGlbTemplate = null;
-const sniperCallbacks = [];
-const sniperModelGroups = []; // Registry of sniper-model groups waiting for GLB
+const sniperGlbTemplates = {}; // Store multiple sniper models by skin ID
+const sniperCallbacks = {}; // Callbacks for each skin
+const sniperModelGroups = {}; // Registry of sniper-model groups waiting for GLB by skin
 
-export function loadSniperModel(onLoad) {
-  if (sniperGlbTemplate) {
-    if (onLoad) onLoad(sniperGlbTemplate.clone());
+export function loadSniperModel(skinId = 'sniper_midnight', onLoad) {
+  const url = skinId === 'sniper_testing' 
+    ? '/sniper skins GLB/Meshy_AI_Super_Sniper_0805114143_texture.glb'
+    : '/sniper skins GLB/Meshy_AI_Midnight_Precision_Ri_0801152731_generate.glb';
+
+  if (sniperGlbTemplates[skinId]) {
+    if (onLoad) onLoad(sniperGlbTemplates[skinId].clone());
     return;
   }
-  if (onLoad) sniperCallbacks.push(onLoad);
+  if (onLoad) {
+    if (!sniperCallbacks[skinId]) sniperCallbacks[skinId] = [];
+    sniperCallbacks[skinId].push(onLoad);
+  }
 
-  if (loadSniperModel.isLoading) return;
-  loadSniperModel.isLoading = true;
+  if (loadSniperModel.isLoading?.[skinId]) return;
+  if (!loadSniperModel.isLoading) loadSniperModel.isLoading = {};
+  loadSniperModel.isLoading[skinId] = true;
 
   const loader = new GLTFLoader();
-  const url = '/sniper skins GLB/Meshy_AI_Midnight_Precision_Ri_0801152731_generate.glb';
 
   loader.load(
     url,
@@ -62,28 +69,32 @@ export function loadSniperModel(onLoad) {
       pivot.scale.set(scale, scale, scale);
 
       pivot.add(model);
-      sniperGlbTemplate = pivot;
+      sniperGlbTemplates[skinId] = pivot;
 
-      sniperCallbacks.forEach(cb => cb(sniperGlbTemplate.clone()));
-      sniperCallbacks.length = 0;
+      if (sniperCallbacks[skinId]) {
+        sniperCallbacks[skinId].forEach(cb => cb(sniperGlbTemplates[skinId].clone()));
+        sniperCallbacks[skinId].length = 0;
+      }
 
-      // Update all registered sniper-model groups
-      sniperModelGroups.forEach(group => {
-        if (group.children.length === 0) {
-          group.add(sniperGlbTemplate.clone());
-        }
-      });
-      sniperModelGroups.length = 0;
+      // Update all registered sniper-model groups for this skin
+      if (sniperModelGroups[skinId]) {
+        sniperModelGroups[skinId].forEach(group => {
+          if (group.children.length === 0) {
+            group.add(sniperGlbTemplates[skinId].clone());
+          }
+        });
+        sniperModelGroups[skinId].length = 0;
+      }
     },
     undefined,
     (err) => {
-      console.error('Failed to load GLB sniper model:', err);
+      console.error(`Failed to load GLB sniper model for ${skinId}:`, err);
     }
   );
 }
 
-// Trigger early preload
-loadSniperModel();
+// Trigger early preload for default sniper
+loadSniperModel('sniper_midnight');
 
 export function setWeaponType(container, type) {
   if (!container) return;
@@ -93,6 +104,10 @@ export function setWeaponType(container, type) {
     }
     if (obj.name === 'sniper-model') {
       obj.visible = (type === 'sniper');
+    }
+    // Also check for weapon-container and make sure it's visible
+    if (obj.name === 'weapon-container') {
+      obj.visible = true;
     }
   });
 }
@@ -417,7 +432,11 @@ export async function buildHumanoid(colorIndex = 0, isLocal = false) {
   const weaponGroup = buildWeaponContainer();
   weaponGroup.name = 'weapon';
   weaponGroup.scale.setScalar(2.2); // make gun visible at body scale
+  weaponGroup.visible = true; // Ensure weapon is visible
   weaponSocket.add(weaponGroup);
+  
+  // Make sure the weapon socket is visible
+  weaponSocket.visible = true;
 
   // Create animator
   const animator = new AvatarAnimator(root, animationClips);
@@ -475,22 +494,49 @@ export function buildWeaponContainer() {
   arGroup.name = 'ar-model';
   container.add(arGroup);
 
-  // 2. Sniper model (GLB)
+  // 2. Sniper model (GLB) - default to midnight skin
   const sniperGroup = new THREE.Group();
   sniperGroup.name = 'sniper-model';
   sniperGroup.visible = false;
   sniperGroup.position.set(0, 0, -0.05);
+  sniperGroup.userData.skinId = 'sniper_midnight'; // Default skin
   container.add(sniperGroup);
 
   // If GLB template is already loaded, add it immediately
-  if (sniperGlbTemplate) {
-    sniperGroup.add(sniperGlbTemplate.clone());
+  if (sniperGlbTemplates['sniper_midnight']) {
+    sniperGroup.add(sniperGlbTemplates['sniper_midnight'].clone());
   } else {
     // Register this group to be updated when GLB loads
-    sniperModelGroups.push(sniperGroup);
+    if (!sniperModelGroups['sniper_midnight']) sniperModelGroups['sniper_midnight'] = [];
+    sniperModelGroups['sniper_midnight'].push(sniperGroup);
   }
 
   return container;
+}
+
+// Update weapon skin based on equipped skin
+export function updateWeaponSkin(container, weaponType, skinId) {
+  if (weaponType !== 'sniper') return;
+  
+  const sniperGroup = container.children.find(child => child.name === 'sniper-model');
+  if (!sniperGroup) return;
+
+  // Remove old model
+  while (sniperGroup.children.length > 0) {
+    sniperGroup.remove(sniperGroup.children[0]);
+  }
+
+  // Load and add new model
+  if (sniperGlbTemplates[skinId]) {
+    sniperGroup.add(sniperGlbTemplates[skinId].clone());
+  } else {
+    // Load the new skin
+    loadSniperModel(skinId, (model) => {
+      sniperGroup.add(model);
+    });
+  }
+  
+  sniperGroup.userData.skinId = skinId;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -501,68 +547,18 @@ export function buildFPHands() {
   // ── Dedicated FPS view model ──────────────────────────────────────────────
   // This is a completely separate model from the world body (which stays intact
   // for third-person and networking). It is parented directly to the camera.
-  // No GLB clone is used — a separate skinned mesh would always show the full
-  // body and is impossible to mask to arms-only without scuffing the geometry.
-
-  const skinMat   = new THREE.MeshLambertMaterial({ color: 0xc68642 }); // skin tone
-  const sleeveMat = new THREE.MeshLambertMaterial({ color: 0x1a2a4a }); // dark tactical sleeve
+  // Now shows ONLY the weapon, no arms visible.
 
   const group = new THREE.Group();
   group.name = 'fp-viewmodel';
 
-  // ── Helper: build one arm (sleeve + forearm skin + hand) ──────────────────
-  function makeArm(side) { // side: 1 = right, -1 = left
-    const arm = new THREE.Group();
-
-    // Upper sleeve (wider, clothing colour)
-    const sleeve = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.042, 0.048, 0.20, 10),
-      sleeveMat
-    );
-    sleeve.rotation.x = Math.PI / 2;
-    sleeve.position.z = -0.10;
-    arm.add(sleeve);
-
-    // Forearm / wrist (skin colour, slightly narrower)
-    const forearm = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.032, 0.040, 0.18, 10),
-      skinMat
-    );
-    forearm.rotation.x = Math.PI / 2;
-    forearm.position.z = 0.09;
-    arm.add(forearm);
-
-    // Hand (flat box)
-    const hand = new THREE.Mesh(
-      new THREE.BoxGeometry(0.072, 0.040, 0.095),
-      skinMat
-    );
-    hand.position.set(0, -0.004, 0.225);
-    arm.add(hand);
-
-    return arm;
-  }
-
-  // ── Right arm — weapon hand ────────────────────────────────────────────────
-  const rightArm = makeArm(1);
-  // Position: lower-right of screen, angled naturally
-  rightArm.position.set(0.27, -0.28, -0.38);
-  rightArm.rotation.set(0.18, 0.08, 0.04);
-  group.add(rightArm);
-
-  // ── Left arm — support hand ────────────────────────────────────────────────
-  const leftArm = makeArm(-1);
-  leftArm.position.set(-0.21, -0.30, -0.32);
-  leftArm.rotation.set(0.14, -0.08, -0.04);
-  group.add(leftArm);
-
-  // ── Weapon container attached to right hand position ──────────────────────
+  // ── Weapon container (centered, no arms) ──────────────────────────────────
   const weaponGroup = buildWeaponContainer();
   weaponGroup.name = 'weapon';
-  // Offset so the weapon sits naturally in the hand, angled forward
-  weaponGroup.position.set(0, 0.01, 0.12);
-  weaponGroup.rotation.set(0, 0, 0);
-  rightArm.add(weaponGroup);
+  // Position weapon in lower-right area, angled to not block view
+  weaponGroup.position.set(0.25, -0.25, -0.5);
+  weaponGroup.rotation.set(0.1, -0.2, 0.05);
+  group.add(weaponGroup);
 
   // ── Dummy animator (no mixer needed — this model has no rig) ──────────────
   const animator = {

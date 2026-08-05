@@ -13,6 +13,7 @@ import {
   animateAvatar,
   createUsernameLabel,
   setWeaponType,
+  updateWeaponSkin,
 } from './AvatarManager.js';
 import {
   MenuAvatarPreview,
@@ -20,6 +21,8 @@ import {
   SKINS_CONFIG,
   getEquippedSkin,
   setEquippedSkin,
+  hasSkinAccess,
+  getAccessibleSkins,
 } from './SkinManager.js';
 import './style.css';
 import {
@@ -1050,13 +1053,14 @@ function setupCharacterPreviewAndSkins() {
     if (!list) return;
     list.innerHTML = '';
 
-    const skins = SKINS_CONFIG[weaponType] || [];
+    // Only show skins the user has access to
+    const skins = getAccessibleSkins(weaponType, sessionUsername);
     const equipped = getEquippedSkin(weaponType);
 
     skins.forEach((skin) => {
       const isEquipped = skin.id === equipped;
       const isPlaceholder = skin.type === 'placeholder';
-      const isOwned = ownedSkins.includes(skin.id);
+      const isOwned = ownedSkins.includes(skin.id) || skin.exclusive; // Exclusive skins are automatically owned if accessible
 
       const card = document.createElement('div');
       card.className = 'skin-card' + (isEquipped ? ' equipped' : '');
@@ -1069,6 +1073,7 @@ function setupCharacterPreviewAndSkins() {
       else if (skin.badge === 'FEATURED')    badgeClass = 'badge-featured';
       else if (skin.badge === 'COMING SOON') badgeClass = 'badge-coming';
       else if (skin.badge === 'CLASSIC')     badgeClass = 'badge-classic';
+      else if (skin.badge === 'EXCLUSIVE')   badgeClass = 'badge-exclusive';
       else if (skin.type === 'glb')          badgeClass = 'badge-glb';
       else if (!isOwned)         { badgeClass = 'badge-locked'; badgeText = 'LOCKED'; }
 
@@ -1096,8 +1101,54 @@ function setupCharacterPreviewAndSkins() {
           if (previewName) previewName.textContent = skin.name;
           if (previewDesc) previewDesc.textContent = skin.desc;
 
-          // Switch the 3D preview to show this weapon type
-          skinPreviewer?.showWeapon(weaponType);
+          // Load and show the specific skin in preview
+          if (skin.type === 'glb' && skin.url) {
+            // Load the GLB model for preview
+            import('three/examples/jsm/loaders/GLTFLoader.js').then(({ GLTFLoader }) => {
+              const loader = new GLTFLoader();
+              
+              // Clear current weapon from preview
+              const previewScene = skinPreviewer.scene;
+              const oldWeapon = previewScene.children.find(c => c.name === 'weapon-container');
+              if (oldWeapon) previewScene.remove(oldWeapon);
+              
+              loader.load(skin.url, (gltf) => {
+                const model = gltf.scene;
+                const box3 = new THREE.Box3().setFromObject(model);
+                const center = box3.getCenter(new THREE.Vector3());
+                const size = box3.getSize(new THREE.Vector3());
+                
+                const pivot = new THREE.Group();
+                pivot.name = 'weapon-container';
+                
+                const sniperMat = new THREE.MeshStandardMaterial({
+                  color: 0x1a1e24,
+                  metalness: 0.85,
+                  roughness: 0.25,
+                });
+                
+                model.traverse((child) => {
+                  if (child.isMesh) {
+                    child.material = sniperMat;
+                  }
+                });
+                
+                model.position.sub(center);
+                model.rotation.y = -Math.PI / 2;
+                
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const targetLength = 0.95;
+                const scale = targetLength / (maxDim || 1);
+                pivot.scale.set(scale, scale, scale);
+                
+                pivot.add(model);
+                previewScene.add(pivot);
+              });
+            });
+          } else {
+            // Switch the 3D preview to show this weapon type
+            skinPreviewer?.showWeapon(weaponType);
+          }
         });
       } else {
         card.style.opacity = isOwned ? '1' : '0.45';
@@ -1113,12 +1164,36 @@ function setupCharacterPreviewAndSkins() {
   if (equipBtn) {
     equipBtn.addEventListener('click', () => {
       if (!skinsSelectedSkinId) return;
+      
+      // Check if user has access to this skin
+      if (!hasSkinAccess(skinsSelectedSkinId, sessionUsername)) {
+        alert('You do not have access to this exclusive skin.');
+        return;
+      }
+      
       setEquippedSkin(skinsCurrentWeapon, skinsSelectedSkinId);
       renderSkinsList(skinsCurrentWeapon);
 
       // If game is running and this weapon is selected, re-apply visual
       if (weapon && weapon.currentWeapon === skinsCurrentWeapon) {
         weapon._updateVisualWeapon();
+        // Update weapon skin
+        if (fpHandsGroup) {
+          const weaponContainer = fpHandsGroup.children.find(c => c.name === 'weapon');
+          if (weaponContainer) {
+            updateWeaponSkin(weaponContainer, skinsCurrentWeapon, skinsSelectedSkinId);
+          }
+        }
+        // Also update local body avatar weapon
+        if (localBodyAvatar && localBodyAvatar.root) {
+          const weaponAnchor = localBodyAvatar.root.children.find(c => c.name === 'weapon-anchor');
+          if (weaponAnchor) {
+            const weaponContainer = weaponAnchor.children.find(c => c.name === 'weapon-container');
+            if (weaponContainer) {
+              updateWeaponSkin(weaponContainer, skinsCurrentWeapon, skinsSelectedSkinId);
+            }
+          }
+        }
       }
 
       // Flash the equip button
@@ -1316,7 +1391,17 @@ function toggleThirdPerson() {
   if (fpHandsGroup) fpHandsGroup.visible = !isThirdPerson;
 
   // Local body only visible in third-person
-  if (localBodyAvatar) localBodyAvatar.root.visible = isThirdPerson;
+  if (localBodyAvatar) {
+    localBodyAvatar.root.visible = isThirdPerson;
+    // Ensure weapon is visible when body is visible
+    if (isThirdPerson) {
+      localBodyAvatar.root.traverse((obj) => {
+        if (obj.name === 'weapon' || obj.name === 'weapon-container' || obj.name === 'weaponSocket') {
+          obj.visible = true;
+        }
+      });
+    }
+  }
 
   // Update crosshair opacity
   const ch = document.getElementById('crosshair');
@@ -1498,6 +1583,13 @@ async function spawnRemotePlayer(id, data) {
   if (data.currentWeapon) {
     setWeaponType(root, data.currentWeapon);
   }
+
+  // Ensure weapon is visible for remote players
+  root.traverse((obj) => {
+    if (obj.name === 'weapon' || obj.name === 'weapon-container' || obj.name === 'weaponSocket') {
+      obj.visible = true;
+    }
+  });
 
   // Username label above head
   const uname = data.username || data.name || id.slice(0, 6);
