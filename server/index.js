@@ -16,6 +16,34 @@ const TICK_MS = 1000 / 18; // Reduced from 30Hz to 18Hz for bandwidth optimizati
 const MAX_HP = 100;
 const RESPAWN_S = 3;
 
+// Anticheat constants
+const MAX_SPEED = 15.0; // Maximum allowed speed (units/sec)
+const MAX_HEIGHT = 10.0; // Maximum allowed height (units)
+const ANTICHEAT_WARNINGS_THRESHOLD = 3; // Number of warnings before kick
+const ANTICHEAT_BAN_DURATION = 300000; // 5 minutes in milliseconds
+
+// Weapon configurations for server-side validation
+const WEAPONS = {
+  ar: {
+    name: 'AR',
+    maxAmmo: 30,
+    reserveMax: 90,
+    reloadTime: 2.0,
+    fireRate: 0.1,
+    damage: 25,
+    maxRange: 120
+  },
+  sniper: {
+    name: 'Sniper',
+    maxAmmo: 1,
+    reserveMax: 10,
+    reloadTime: 2.5,
+    fireRate: 0.15,
+    damage: 100,
+    maxRange: 200
+  }
+};
+
 // JWT secret for token validation
 const JWT_SECRET = process.env.JWT_SECRET || 'fps-game-secret-key-change-in-production';
 
@@ -60,6 +88,24 @@ async function connectToMongo() {
     } catch (migrationError) {
       console.error('Skin migration error:', migrationError);
     }
+
+    // Migration: Add anticheat fields to existing accounts that don't have them
+    try {
+      const withoutAnticheat = await accountsCollection.countDocuments({ anticheatWarnings: { $exists: false } });
+      console.log(`Accounts without anticheat field: ${withoutAnticheat}`);
+
+      if (withoutAnticheat > 0) {
+        const result = await accountsCollection.updateMany(
+          { anticheatWarnings: { $exists: false } },
+          { $set: { anticheatWarnings: 0, lastAnticheatWarning: null, lastAnticheatReason: null } }
+        );
+        console.log(`Anticheat migration: matched ${result.matchedCount}, modified ${result.modifiedCount} accounts`);
+      } else {
+        console.log('All accounts already have anticheat field');
+      }
+    } catch (anticheatMigrationError) {
+      console.error('Anticheat migration error:', anticheatMigrationError);
+    }
   } catch (error) {
     console.error('MongoDB connection error:', error);
     console.log('Running without database - accounts will not persist');
@@ -94,6 +140,7 @@ function nextSpawn() {
 
 function createPlayer(socket, username) {
   const spawn = nextSpawn();
+  const now = Date.now();
   return {
     id: socket.id,
     accountId: username,
@@ -103,17 +150,29 @@ function createPlayer(socket, username) {
     x: spawn.x, y: spawn.y, z: spawn.z,
     yaw: 0, pitch: 0, speed: 0,
     isGrounded: true,
+    velocityY: 0,
     health: MAX_HP,
     kills: 0,
     deaths: 0,
     isDead: false,
     lastSeen: Date.now(),
     currentWeapon: 'ar',
+    // Anticheat tracking
+    anticheatWarnings: 0,
+    lastAnticheatWarning: 0,
+    isBanned: false,
+    banExpiry: 0,
+    // Weapon anticheat tracking
+    lastShotTime: now,
+    lastReloadTime: now,
+    isReloading: false,
+    reloadStartTime: 0,
     // Previous state for delta compression
     _prev: {
       x: spawn.x, y: spawn.y, z: spawn.z,
       yaw: 0, pitch: 0, speed: 0,
       isGrounded: true,
+      velocityY: 0,
       health: MAX_HP,
       isDead: false,
       currentWeapon: 'ar',
@@ -128,6 +187,7 @@ function sanitize(p) {
     yaw: p.yaw, pitch: p.pitch,
     speed: p.speed,
     isGrounded: p.isGrounded,
+    velocityY: p.velocityY || 0, // Include vertical velocity for jump animation sync
     health: p.health,
     kills: p.kills, deaths: p.deaths,
     name: p.name,
@@ -139,6 +199,48 @@ function sanitize(p) {
 }
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// Anticheat: Kick player and add warning to account
+async function kickPlayerForCheating(socket, player, reason) {
+  console.log(`[Anticheat] Kicking ${player.username} for: ${reason}`);
+  
+  // Set ban status
+  player.isBanned = true;
+  player.banExpiry = Date.now() + ANTICHEAT_BAN_DURATION;
+  
+  // Notify player
+  socket.emit('anticheat_kick', {
+    reason: reason,
+    duration: ANTICHEAT_BAN_DURATION / 1000, // seconds
+    expiry: new Date(player.banExpiry).toISOString()
+  });
+  
+  // Add warning to database if available
+  if (accountsCollection) {
+    try {
+      await accountsCollection.updateOne(
+        { username: player.username },
+        {
+          $inc: { anticheatWarnings: 1 },
+          $set: { 
+            lastAnticheatWarning: new Date(),
+            lastAnticheatReason: reason
+          }
+        }
+      );
+      console.log(`[Anticheat] Added warning to database for ${player.username}`);
+    } catch (error) {
+      console.error(`[Anticheat] Failed to update database warning: ${error}`);
+    }
+  }
+  
+  // Disconnect player
+  players.delete(socket.id);
+  socket.disconnect();
+  
+  // Notify other players
+  socket.broadcast.emit('player_leave', socket.id);
+}
 
 // Quantization functions to reduce bandwidth
 function quantizePosition(val) {
@@ -187,6 +289,10 @@ function createDeltaUpdate(prevState, currentState) {
   }
   if (prevState.isGrounded !== currentState.isGrounded) {
     delta.isGrounded = currentState.isGrounded;
+    hasChanges = true;
+  }
+  if (prevState.velocityY !== currentState.velocityY) {
+    delta.velocityY = quantizePosition(currentState.velocityY);
     hasChanges = true;
   }
   if (prevState.health !== currentState.health) {
@@ -492,6 +598,47 @@ io.on('connection', async (socket) => {
   socket.on('move', (snap) => {
     const p = players.get(socket.id);
     if (!p || p.isDead) return;
+    
+    // Anticheat: Check if player is banned
+    if (p.isBanned && Date.now() < p.banExpiry) {
+      console.log(`[Anticheat] Banned player ${p.username} attempted to move`);
+      socket.disconnect();
+      return;
+    }
+    
+    // Reset ban if expired
+    if (p.isBanned && Date.now() >= p.banExpiry) {
+      p.isBanned = false;
+      p.anticheatWarnings = 0;
+      console.log(`[Anticheat] Ban expired for ${p.username}`);
+    }
+    
+    // Anticheat: Speed check
+    const speed = Math.abs(snap.speed || 0);
+    if (speed > MAX_SPEED) {
+      p.anticheatWarnings++;
+      p.lastAnticheatWarning = Date.now();
+      console.log(`[Anticheat] Speed violation for ${p.username}: ${speed} > ${MAX_SPEED} (Warning ${p.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
+      
+      if (p.anticheatWarnings >= ANTICHEAT_WARNINGS_THRESHOLD) {
+        kickPlayerForCheating(socket, p, 'Speed hacking detected');
+        return;
+      }
+    }
+    
+    // Anticheat: Height/Flight check
+    const height = snap.y || 0;
+    if (height > MAX_HEIGHT && !snap.isGrounded) {
+      p.anticheatWarnings++;
+      p.lastAnticheatWarning = Date.now();
+      console.log(`[Anticheat] Height violation for ${p.username}: ${height} > ${MAX_HEIGHT} (Warning ${p.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
+      
+      if (p.anticheatWarnings >= ANTICHEAT_WARNINGS_THRESHOLD) {
+        kickPlayerForCheating(socket, p, 'Flight hacking detected');
+        return;
+      }
+    }
+    
     p.x = clamp(snap.x, -74, 74);
     p.y = Math.max(0, snap.y);
     p.z = clamp(snap.z, -74, 74);
@@ -499,6 +646,7 @@ io.on('connection', async (socket) => {
     p.pitch = clamp(snap.pitch || 0, -Math.PI / 2, Math.PI / 2);
     p.speed = Math.abs(snap.speed || 0);
     p.isGrounded = !!snap.isGrounded;
+    p.velocityY = snap.velocityY || 0; // Store vertical velocity for jump animation sync
     p.lastSeen = Date.now();
   });
 
@@ -508,6 +656,60 @@ io.on('connection', async (socket) => {
 
     // Validate shooter is alive and legitimate
     if (shooter.health <= 0) return;
+
+    // Anticheat: Check if player is banned
+    if (shooter.isBanned && Date.now() < shooter.banExpiry) {
+      console.log(`[Anticheat] Banned player ${shooter.username} attempted to shoot`);
+      socket.disconnect();
+      return;
+    }
+
+    // Get weapon configuration
+    const weaponConfig = WEAPONS[shooter.currentWeapon] || WEAPONS.ar;
+    
+    // Anticheat: Fire rate validation
+    const now = Date.now();
+    const timeSinceLastShot = now - shooter.lastShotTime;
+    const minFireRate = weaponConfig.fireRate * 1000; // Convert to milliseconds
+    
+    if (timeSinceLastShot < minFireRate) {
+      shooter.anticheatWarnings++;
+      shooter.lastAnticheatWarning = now;
+      console.log(`[Anticheat] Fire rate violation for ${shooter.username}: ${timeSinceLastShot}ms < ${minFireRate}ms (Warning ${shooter.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
+      
+      if (shooter.anticheatWarnings >= ANTICHEAT_WARNINGS_THRESHOLD) {
+        kickPlayerForCheating(socket, shooter, 'Rapid fire hacking detected');
+        return;
+      }
+    }
+    
+    // Update last shot time
+    shooter.lastShotTime = now;
+    
+    // Cancel reload if player shoots (realistic behavior)
+    if (shooter.isReloading) {
+      shooter.isReloading = false;
+      shooter.reloadStartTime = 0;
+    }
+
+    // Anticheat: Damage validation based on weapon
+    const clientDamage = data.damage || 25;
+    const expectedDamage = weaponConfig.damage;
+    
+    // Allow small margin of error for network latency but catch obvious damage hacks
+    if (clientDamage > expectedDamage * 1.5) {
+      shooter.anticheatWarnings++;
+      shooter.lastAnticheatWarning = now;
+      console.log(`[Anticheat] Damage violation for ${shooter.username}: ${clientDamage} > ${expectedDamage * 1.5} (Warning ${shooter.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
+      
+      if (shooter.anticheatWarnings >= ANTICHEAT_WARNINGS_THRESHOLD) {
+        kickPlayerForCheating(socket, shooter, 'Damage hacking detected');
+        return;
+      }
+    }
+    
+    // Use server-side damage value to prevent tampering
+    const serverDamage = expectedDamage;
 
     io.emit('player_shot', {
       shooterId: socket.id,
@@ -519,17 +721,14 @@ io.on('connection', async (socket) => {
       const victim = players.get(data.hitId);
       if (victim.isDead) return;
 
-      // Validate damage is reasonable (1-100)
-      const damage = clamp(data.damage || 25, 1, 100);
-
       // Server-side health calculation (prevent client tampering)
-      victim.health = Math.max(0, victim.health - damage);
+      victim.health = Math.max(0, victim.health - serverDamage);
 
       io.to(data.hitId).emit('player_hit', {
-        shooterId: socket.id, victimId: data.hitId, damage, health: victim.health,
+        shooterId: socket.id, victimId: data.hitId, damage: serverDamage, health: victim.health,
       });
       socket.emit('player_hit', {
-        shooterId: socket.id, victimId: data.hitId, damage, health: victim.health,
+        shooterId: socket.id, victimId: data.hitId, damage: serverDamage, health: victim.health,
       });
       io.emit('health_update', { id: data.hitId, health: victim.health });
 
@@ -565,6 +764,78 @@ io.on('connection', async (socket) => {
       id: socket.id,
       weapon: p.currentWeapon
     });
+  });
+
+  socket.on('reload_start', (data) => {
+    const p = players.get(socket.id);
+    if (!p || p.isDead) return;
+
+    // Anticheat: Check if player is banned
+    if (p.isBanned && Date.now() < p.banExpiry) {
+      console.log(`[Anticheat] Banned player ${p.username} attempted to reload`);
+      socket.disconnect();
+      return;
+    }
+
+    // Get weapon configuration
+    const weaponConfig = WEAPONS[p.currentWeapon] || WEAPONS.ar;
+    
+    // Anticheat: Reload time validation
+    const now = Date.now();
+    const timeSinceLastReload = now - p.lastReloadTime;
+    const minReloadTime = weaponConfig.reloadTime * 1000; // Convert to milliseconds
+    
+    // Check if reload is happening too quickly
+    if (p.isReloading && timeSinceLastReload < minReloadTime * 0.8) {
+      p.anticheatWarnings++;
+      p.lastAnticheatWarning = now;
+      console.log(`[Anticheat] Reload time violation for ${p.username}: ${timeSinceLastReload}ms < ${minReloadTime * 0.8}ms (Warning ${p.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
+      
+      if (p.anticheatWarnings >= ANTICHEAT_WARNINGS_THRESHOLD) {
+        kickPlayerForCheating(socket, p, 'Reload hacking detected');
+        return;
+      }
+    }
+    
+    // Update reload state
+    p.isReloading = true;
+    p.reloadStartTime = now;
+    p.lastReloadTime = now;
+  });
+
+  socket.on('reload_complete', (data) => {
+    const p = players.get(socket.id);
+    if (!p || p.isDead) return;
+
+    // Anticheat: Check if player is banned
+    if (p.isBanned && Date.now() < p.banExpiry) {
+      console.log(`[Anticheat] Banned player ${p.username} attempted to complete reload`);
+      socket.disconnect();
+      return;
+    }
+
+    // Get weapon configuration
+    const weaponConfig = WEAPONS[p.currentWeapon] || WEAPONS.ar;
+    
+    // Anticheat: Validate reload completion time
+    const now = Date.now();
+    const reloadDuration = now - p.reloadStartTime;
+    const expectedReloadTime = weaponConfig.reloadTime * 1000; // Convert to milliseconds
+    
+    // Allow 20% margin for network latency but catch obvious reload hacks
+    if (reloadDuration < expectedReloadTime * 0.8) {
+      p.anticheatWarnings++;
+      p.lastAnticheatWarning = now;
+      console.log(`[Anticheat] Reload completion time violation for ${p.username}: ${reloadDuration}ms < ${expectedReloadTime * 0.8}ms (Warning ${p.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
+      
+      if (p.anticheatWarnings >= ANTICHEAT_WARNINGS_THRESHOLD) {
+        kickPlayerForCheating(socket, p, 'Instant reload hacking detected');
+        return;
+      }
+    }
+    
+    // Update reload state
+    p.isReloading = false;
   });
 
   socket.on('disconnect', () => {
@@ -613,9 +884,15 @@ async function killPlayer(victimId, killerId) {
     const p = players.get(victimId);
     if (!p) return;
     const s = nextSpawn();
+    const now = Date.now();
     p.x = s.x; p.y = s.y; p.z = s.z;
     p.health = MAX_HP;
     p.isDead = false;
+    // Reset weapon anticheat tracking on respawn
+    p.isReloading = false;
+    p.reloadStartTime = 0;
+    p.lastShotTime = now;
+    p.lastReloadTime = now;
     io.emit('player_respawn', { id: victimId, ...s });
     io.emit('health_update', { id: victimId, health: MAX_HP });
   }, RESPAWN_S * 1000);

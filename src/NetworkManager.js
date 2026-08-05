@@ -35,6 +35,7 @@ export class NetworkManager {
     this.onChatMessage = null; // (data) => {}
     this.onPlayerWeaponChange = null; // (id, weapon) => {}
     this.onDuplicateLogin = null; // (message) => {}
+    this.onAnticheatKick = null; // (data) => {}
 
     this._setupEvents();
 
@@ -85,6 +86,7 @@ export class NetworkManager {
           x: 0, y: 0, z: 0,
           yaw: 0, pitch: 0,
           speed: 0, isGrounded: true,
+          velocityY: 0,
           health: 100, isDead: false,
           username: '',
           currentWeapon: 'ar',
@@ -98,6 +100,7 @@ export class NetworkManager {
         if (delta.pitch !== undefined) fullState.pitch = delta.pitch;
         if (delta.speed !== undefined) fullState.speed = delta.speed;
         if (delta.isGrounded !== undefined) fullState.isGrounded = delta.isGrounded;
+        if (delta.velocityY !== undefined) fullState.velocityY = delta.velocityY;
         if (delta.health !== undefined) fullState.health = delta.health;
         if (delta.isDead !== undefined) fullState.isDead = delta.isDead;
         if (delta.username !== undefined) fullState.username = delta.username;
@@ -146,6 +149,10 @@ export class NetworkManager {
 
     this.socket.on('duplicate_login', (data) => {
       if (this.onDuplicateLogin) this.onDuplicateLogin(data.message);
+    });
+
+    this.socket.on('anticheat_kick', (data) => {
+      if (this.onAnticheatKick) this.onAnticheatKick(data);
     });
   }
 

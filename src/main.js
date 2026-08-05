@@ -38,7 +38,7 @@ const EYE_HEIGHT  = 1.65;
 // ── Update Log ─────────────────────────────────────────────────────────────────
 const UPDATE_LOG = [
   {
-    date: '2024-07-30',
+    date: '2026-08-05',
     items: [
       'Added MongoDB Atlas for persistent account storage',
       'Added JWT token-based authentication',
@@ -51,6 +51,11 @@ const UPDATE_LOG = [
       'Added killer name on death screen',
       'Added sniper zoom sensitivity reduction',
       'Added chat system',
+      'Fixed jumping animation sync for multiplayer',
+      'Added anticheat system with velocity and flight detection',
+      'Added weapon damage validation anticheat',
+      'Added fire rate validation anticheat',
+      'Added reload time validation anticheat',
     ]
   }
 ];
@@ -1462,6 +1467,12 @@ function setupNetworkCallbacks() {
     alert(message || 'You have been logged in from another location');
     signOut();
   };
+
+  net.onAnticheatKick = (data) => {
+    const message = `Anti-cheat violation: ${data.reason}\nYou have been temporarily banned for ${data.duration} seconds.\nBan expires: ${new Date(data.expiry).toLocaleString()}`;
+    alert(message);
+    signOut();
+  };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1710,7 +1721,7 @@ function gameLoop() {
     rp.animState.speed      = snap.speed || 0;
     rp.animState.isGrounded = snap.isGrounded;
     rp.animState.pitch      = snap.pitch || 0;
-    rp.animState.velocityY  = 0; // No velocityY in network snapshot currently
+    rp.animState.velocityY  = snap.velocityY || 0; // Use actual velocityY for jump animation sync
     animateAvatar(rp, rp.animState, delta);
   }
 

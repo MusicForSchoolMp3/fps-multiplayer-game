@@ -149,6 +149,11 @@ export class WeaponSystem {
       this.isReloading = false;
       if (this.ui.reloadEl) this.ui.reloadEl.style.display = 'none';
       this._updateUI();
+      
+      // Send reload completion event to server for anticheat validation
+      if (this.net && this.net.socket) {
+        this.net.socket.emit('reload_complete', { weapon: this.currentWeapon });
+      }
     }
 
     // Auto-reload on empty mag
@@ -330,6 +335,11 @@ export class WeaponSystem {
 
     // Notify animation system
     if (this.onReload) this.onReload();
+    
+    // Send reload event to server for anticheat validation
+    if (this.net && this.net.socket) {
+      this.net.socket.emit('reload_start', { weapon: this.currentWeapon });
+    }
   }
 
   _spawnTracer(from, to) {

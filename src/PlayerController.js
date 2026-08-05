@@ -259,6 +259,7 @@ export class PlayerController {
       pitch: quantize(this.pitch, 1000),
       speed: Math.round(Math.sqrt(this.velocity.x ** 2 + this.velocity.z ** 2) * 10) / 10, // 1 decimal place
       isGrounded: this.isGrounded,
+      velocityY: quantize(this.velocity.y, 100), // Include vertical velocity for jump animation sync
     };
   }
 
