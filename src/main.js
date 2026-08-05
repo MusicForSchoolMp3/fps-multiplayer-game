@@ -1483,7 +1483,8 @@ async function spawnRemotePlayer(id, data) {
   if (remotePlayers.has(id)) return;
   const colorIdx = data.colorIndex || 0;
   const { root, joints, animator } = await buildHumanoid(colorIdx, false);
-  root.position.set(data.x || 0, 0, data.z || 0);
+  // Subtract EYE_HEIGHT to convert from eye position to ground position
+  root.position.set(data.x || 0, (data.y || 0) - EYE_HEIGHT, data.z || 0);
   
   // Set initial weapon type
   if (data.currentWeapon) {
@@ -1716,7 +1717,8 @@ function gameLoop() {
   for (const [id, rp] of remotePlayers) {
     const snap = net.getInterpolated(id);
     if (!snap) continue;
-    rp.root.position.set(snap.x, snap.y, snap.z); // Use actual Y position for jump height visibility
+    // Subtract EYE_HEIGHT to convert from eye position to ground position
+    rp.root.position.set(snap.x, snap.y - EYE_HEIGHT, snap.z); // Use actual Y position for jump height visibility
     rp.root.rotation.y      = snap.yaw + Math.PI;
     rp.animState.speed      = snap.speed || 0;
     rp.animState.isGrounded = snap.isGrounded;

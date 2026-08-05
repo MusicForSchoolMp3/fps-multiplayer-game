@@ -18,7 +18,6 @@ const RESPAWN_S = 3;
 
 // Anticheat constants
 const MAX_SPEED = 15.0; // Maximum allowed speed (units/sec)
-const MAX_HEIGHT = 10.0; // Maximum allowed height (units)
 const ANTICHEAT_WARNINGS_THRESHOLD = 3; // Number of warnings before kick
 const ANTICHEAT_BAN_DURATION = 300000; // 5 minutes in milliseconds
 
@@ -97,11 +96,20 @@ async function connectToMongo() {
       if (withoutAnticheat > 0) {
         const result = await accountsCollection.updateMany(
           { anticheatWarnings: { $exists: false } },
-          { $set: { anticheatWarnings: 0, lastAnticheatWarning: null, lastAnticheatReason: null } }
+          { $set: { anticheatWarnings: 0, lastAnticheatWarning: null, lastAnticheatReason: null, isBanned: false, banExpiry: null } }
         );
         console.log(`Anticheat migration: matched ${result.matchedCount}, modified ${result.modifiedCount} accounts`);
       } else {
         console.log('All accounts already have anticheat field');
+      }
+      
+      // Clear any existing bans from previous false positives
+      const clearBansResult = await accountsCollection.updateMany(
+        { isBanned: true },
+        { $set: { isBanned: false, banExpiry: null, anticheatWarnings: 0 } }
+      );
+      if (clearBansResult.modifiedCount > 0) {
+        console.log(`Cleared ${clearBansResult.modifiedCount} existing bans from false positives`);
       }
     } catch (anticheatMigrationError) {
       console.error('Anticheat migration error:', anticheatMigrationError);
@@ -653,12 +661,15 @@ io.on('connection', async (socket) => {
       }
     }
     
-    // Anticheat: Height/Flight check
-    const height = snap.y || 0;
-    if (height > MAX_HEIGHT && !snap.isGrounded) {
+    // Anticheat: Height/Flight check (account for eye height)
+    const eyeHeight = 1.65; // Match client EYE_HEIGHT
+    const groundHeight = (snap.y || 0) - eyeHeight;
+    // Allow some tolerance for jumping (normal jump reaches ~1-2 units above ground)
+    const maxJumpHeight = 8.0; // Maximum reasonable jump height (increased for safety)
+    if (groundHeight > maxJumpHeight && !snap.isGrounded) {
       p.anticheatWarnings++;
       p.lastAnticheatWarning = Date.now();
-      console.log(`[Anticheat] Height violation for ${p.username}: ${height} > ${MAX_HEIGHT} (Warning ${p.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
+      console.log(`[Anticheat] Height violation for ${p.username}: ${groundHeight} > ${maxJumpHeight} (Warning ${p.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
       
       if (p.anticheatWarnings >= ANTICHEAT_WARNINGS_THRESHOLD) {
         kickPlayerForCheating(socket, p, 'Flight hacking detected');
@@ -694,15 +705,17 @@ io.on('connection', async (socket) => {
     // Get weapon configuration
     const weaponConfig = WEAPONS[shooter.currentWeapon] || WEAPONS.ar;
     
-    // Anticheat: Fire rate validation
+    // Anticheat: Fire rate validation (with network latency tolerance)
     const now = Date.now();
     const timeSinceLastShot = now - shooter.lastShotTime;
     const minFireRate = weaponConfig.fireRate * 1000; // Convert to milliseconds
+    const latencyTolerance = 100; // 100ms tolerance for network latency
     
-    if (timeSinceLastShot < minFireRate) {
+    // Only check fire rate for sniper (AR is meant to be rapid fire)
+    if (shooter.currentWeapon === 'sniper' && timeSinceLastShot < minFireRate - latencyTolerance) {
       shooter.anticheatWarnings++;
       shooter.lastAnticheatWarning = now;
-      console.log(`[Anticheat] Fire rate violation for ${shooter.username}: ${timeSinceLastShot}ms < ${minFireRate}ms (Warning ${shooter.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
+      console.log(`[Anticheat] Fire rate violation for ${shooter.username}: ${timeSinceLastShot}ms < ${minFireRate - latencyTolerance}ms (Warning ${shooter.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
       
       if (shooter.anticheatWarnings >= ANTICHEAT_WARNINGS_THRESHOLD) {
         kickPlayerForCheating(socket, shooter, 'Rapid fire hacking detected');
