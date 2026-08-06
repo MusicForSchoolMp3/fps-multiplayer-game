@@ -46,25 +46,14 @@ const UPDATE_LOG = [
   {
     date: '2026-08-05',
     items: [
-      'Added MongoDB Atlas for persistent account storage',
-      'Added JWT token-based authentication',
-      'Added password hashing with bcrypt',
-      'Added case-insensitive username uniqueness',
-      'Added no-space validation for usernames',
-      'Added server-side kill validation',
-      'Added server-side total kills validation',
-      'Added ammo refill on respawn',
-      'Added killer name on death screen',
-      'Added sniper zoom sensitivity reduction',
-      'Added chat system',
-      'Fixed jumping animation sync for multiplayer',
-      'Added anticheat system with velocity and flight detection',
-      'Added weapon damage validation anticheat',
-      'Added fire rate validation anticheat',
-      'Added reload time validation anticheat',
+      'COMING SOON: Brand new map, ranks, more weapons, and both character and weapon skins',
+      'Fixed animations',
+      'Added unlockable emotes',
+      'Added emote wheel',
+      'Added anticheat',
       'Fixed weapon switching ammo persistence to prevent abuse',
       {
-        text: 'Note to Jack Dongas: Any attempt to hack in my game will not go unseen, i added an anticheat because of you.',
+        text: 'Note to Users: The current false banning issue has been resolved.',
         bold: true
       }
     ]
