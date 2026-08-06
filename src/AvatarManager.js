@@ -665,7 +665,7 @@ export function animateAvatar(avatarData, animState, delta) {
 // Caller should set sprite.position.y = ~2.0 relative to avatar root.
 // Pass kills >= 0 to show a kill-count badge next to the name.
 // ─────────────────────────────────────────────────────────────────────────────
-export function createUsernameLabel(username, kills = -1) {
+export function createUsernameLabel(username, kills = -1, lbRank = 0) {
   const W = 380, H = 72;
   const canvas = document.createElement('canvas');
   canvas.width  = W;
@@ -684,8 +684,34 @@ export function createUsernameLabel(username, kills = -1) {
   _roundRect(ctx, 6, 6, W - 12, H - 12, 14);
   ctx.stroke();
 
+  let nameLeft  = 16;
+  let nameRight = W - 16;
+
+  // Leaderboard rank badge on the left (only the top 3 get it).
+  if (lbRank >= 1 && lbRank <= 3) {
+    const ringColors = { 1: '#ffd700', 2: '#e8e8e8', 3: '#cd7f32' };
+    const ring = ringColors[lbRank];
+    const rw = 34;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    _roundRect(ctx, 10, 10, rw, H - 20, 8);
+    ctx.fill();
+    ctx.strokeStyle = ring;
+    ctx.lineWidth = 1.2;
+    _roundRect(ctx, 10, 10, rw, H - 20, 8);
+    ctx.stroke();
+    ctx.fillStyle = ring;
+    ctx.font      = 'bold 22px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor  = ring;
+    ctx.shadowBlur   = 6;
+    ctx.fillText(`#${lbRank}`, 10 + rw / 2, H / 2);
+    ctx.shadowBlur = 0;
+    nameLeft = 10 + rw + 6;
+  }
+
   if (kills >= 0) {
-    // ── Kill badge on the right ──────────────────────────────────────────────
+    // ── Kill badge on the right ────────────────────────────────────────────
     const badgeW = 68;
     const badgeX = W - badgeW - 10;
 
@@ -706,39 +732,29 @@ export function createUsernameLabel(username, kills = -1) {
     ctx.shadowColor  = 'rgba(255,200,0,0.6)';
     ctx.shadowBlur   = 6;
     ctx.fillText(`★${kills}`, badgeX + badgeW / 2, H / 2);
+    ctx.shadowBlur = 0;
 
-    // Username text (left portion)
-    ctx.shadowColor  = 'rgba(255,100,0,0.4)';
-    ctx.shadowBlur   = 8;
-    ctx.fillStyle = '#ffffff';
-    ctx.font      = 'bold 28px Arial, sans-serif';
-    ctx.textAlign = 'center';
-    const nameAreaW = badgeX - 10;
-    let text = username;
-    if (ctx.measureText(text).width > nameAreaW - 16) {
-      while (ctx.measureText(text + '…').width > nameAreaW - 16 && text.length > 1) {
-        text = text.slice(0, -1);
-      }
-      text += '…';
-    }
-    ctx.fillText(text, nameAreaW / 2 + 6, H / 2);
-  } else {
-    // ── Name only (no badge) ─────────────────────────────────────────────────
-    ctx.fillStyle = '#ffffff';
-    ctx.font      = 'bold 28px Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.shadowColor  = 'rgba(255,100,0,0.4)';
-    ctx.shadowBlur   = 8;
-    let text = username;
-    if (ctx.measureText(text).width > W - 28) {
-      while (ctx.measureText(text + '…').width > W - 28 && text.length > 1) {
-        text = text.slice(0, -1);
-      }
-      text += '…';
-    }
-    ctx.fillText(text, W / 2, H / 2);
+    nameRight = badgeX - 10;
   }
+
+  // ── Username text ──────────────────────────────────────────────────────────
+  const avail = nameRight - nameLeft;
+  ctx.fillStyle    = '#ffffff';
+  ctx.font         = 'bold 28px Arial, sans-serif';
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor  = 'rgba(255,100,0,0.4)';
+  ctx.shadowBlur   = 8;
+  let text = username;
+  if (avail < 16) {
+    text = '';
+  } else if (ctx.measureText(text).width > avail) {
+    while (ctx.measureText(text + '…').width > avail && text.length > 1) {
+      text = text.slice(0, -1);
+    }
+    text += '…';
+  }
+  ctx.fillText(text, (nameLeft + nameRight) / 2, H / 2);
 
   const texture  = new THREE.CanvasTexture(canvas);
   const material = new THREE.SpriteMaterial({
@@ -756,7 +772,7 @@ export function createUsernameLabel(username, kills = -1) {
 // Rebuild an existing username-label sprite texture in-place.
 // Call this whenever a player's kill count changes.
 // ─────────────────────────────────────────────────────────────────────────────
-export function updateUsernameLabel(sprite, username, kills = 0) {
+export function updateUsernameLabel(sprite, username, kills = 0, lbRank = 0) {
   if (!sprite || !sprite.material) return;
 
   const W = 380, H = 72;
@@ -766,7 +782,7 @@ export function updateUsernameLabel(sprite, username, kills = 0) {
   const ctx = canvas.getContext('2d');
 
   // Reuse createUsernameLabel's drawing logic via a temporary sprite
-  const tmp = createUsernameLabel(username, kills);
+  const tmp = createUsernameLabel(username, kills, lbRank);
   // Swap the texture
   const oldMap = sprite.material.map;
   sprite.material.map = tmp.material.map;

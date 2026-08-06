@@ -516,12 +516,13 @@ app.post('/api/register', async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Missing username or password' });
 
-  // Validate username: no spaces, 3-20 characters
-  if (username.includes(' ')) {
-    return res.status(400).json({ error: 'Username cannot contain spaces' });
-  }
+  // Validate username: only letters, numbers and underscores, 3-20 characters.
+  // No spaces, emojis or special characters (e.g. * ; : { [ ...).
   if (username.length < 3 || username.length > 20) {
     return res.status(400).json({ error: 'Username must be 3-20 characters' });
+  }
+  if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+    return res.status(400).json({ error: 'Username can only contain letters, numbers and underscores' });
   }
 
   if (!accountsCollection) {
@@ -586,11 +587,6 @@ app.post('/api/login', async (req, res) => {
     const validPassword = await bcrypt.compare(password, account.passwordHash);
     if (!validPassword) {
       return res.status(401).json({ error: 'Invalid username or password' });
-    }
-
-    // Block blacklisted accounts from the game.
-    if (isBlacklisted(account.username)) {
-      return res.status(403).json({ error: 'This account is blacklisted' });
     }
 
     // Generate JWT token
@@ -774,7 +770,7 @@ app.get('/api/leaderboard', async (req, res) => {
   if (!accountsCollection) return res.status(500).json({ error: 'Database not available' });
 
   const type = req.query.type === 'monthly' ? 'monthly' : 'global';
-  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 100));
 
   try {
     // Query: exclude blacklisted, pick the right kill counter.
@@ -788,13 +784,11 @@ app.get('/api/leaderboard', async (req, res) => {
       .limit(limit)
       .toArray();
 
-    let prevKills = Infinity;
-    let rank = 0;
-    const list = docs.map((acc) => {
+    // Sequential positions 1..N - every row gets its own spot even when kills
+    // are tied (no duplicate rank numbers).
+    const list = docs.map((acc, i) => {
       const kills = type === 'monthly' ? (acc.monthKills || 0) : (acc.totalKills || 0);
-      // Tied scores share the same rank.
-      if (kills < prevKills) { rank++; prevKills = kills; }
-      return { rank, username: acc.username, kills };
+      return { rank: i + 1, username: acc.username, kills };
     });
 
     res.json({ type, month: currentMonthKey(), entries: list });
@@ -850,14 +844,6 @@ io.on('connection', async (socket) => {
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
       username = decoded.username;
-
-      // Reject blacklisted accounts outright (testing).
-      if (isBlacklisted(username)) {
-        console.log(`[-] Rejected connection: ${username} is blacklisted`);
-        socket.emit('blacklisted', { message: 'This account is blacklisted' });
-        socket.disconnect();
-        return;
-      }
 
       // Verify account still exists in database
       if (accountsCollection) {

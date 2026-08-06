@@ -15,6 +15,7 @@ import {
   buildFPHands,
   animateAvatar,
   createUsernameLabel,
+  updateUsernameLabel,
   setWeaponType,
   updateWeaponSkin,
 } from './AvatarManager.js';
@@ -168,8 +169,10 @@ let localHealth       = 100;
 let localColorIdx     = 0;
 let localUsername     = '';
 const scores          = new Map();
-const remotePlayers   = new Map(); // id → { root, joints, animState, label }
+const remotePlayers   = new Map(); // id → { root, joints, animState, label, hitbox, username }
 const _remoteTracers  = [];
+let lbRanks           = new Map(); // username(lower) → global leaderboard rank
+let inGameRankTimer   = null;      // interval that refreshes in-game rank badges
 let _lastMoveSent     = 0;
 const MOVE_INTERVAL   = 1000 / TICK_RATE;
 let _lastSentState    = null; // Track last sent state for delta compression
@@ -264,7 +267,7 @@ function closeLeaderboard() {
 async function refreshLeaderboard() {
   if (!leaderboardList) return;
   try {
-    const res = await fetch(`${SERVER_URL}/api/leaderboard?type=${leaderboardTab}`);
+    const res = await fetch(`${SERVER_URL}/api/leaderboard?type=${leaderboardTab}&limit=100`);
     if (!res.ok) throw new Error('Leaderboard request failed');
     const data = await res.json();
     renderLeaderboard(data);
@@ -312,6 +315,36 @@ function renderLeaderboard(data) {
 
 function escapeHtml(str) {
   return String(str ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  IN-GAME RANK BADGES  (top 3 leaderboard players get #1/#2/#3 above their head)
+// ══════════════════════════════════════════════════════════════════════════════
+
+function applyRankToLabel(label, displayName, lookupName) {
+  if (!label) return;
+  const key = String(lookupName != null ? lookupName : displayName).toLowerCase();
+  const rank = lbRanks.get(key) || 0;
+  updateUsernameLabel(label, displayName, -1, rank);
+}
+
+async function refreshInGameRanks() {
+  try {
+    const res = await fetch(`${SERVER_URL}/api/leaderboard?type=global&limit=100`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const next = new Map();
+    for (const e of (data.entries || [])) next.set(e.username.toLowerCase(), e.rank);
+    lbRanks = next;
+    // Refresh badges on every connected remote player.
+    for (const rp of remotePlayers.values()) {
+      if (rp && rp.label) applyRankToLabel(rp.label, rp.username, rp.username);
+    }
+    // And on the local player's own label (third-person view).
+    if (localBodyAvatar && localBodyAvatar.label) {
+      applyRankToLabel(localBodyAvatar.label, localUsername + ' (you)', localUsername);
+    }
+  } catch (err) { /* ignore transient network errors */ }
 }
 
 async function checkSession() {
@@ -453,8 +486,8 @@ function setupAuthUI() {
     if (!user || !pass || !conf) { regError.textContent = 'Please fill in all fields.'; return; }
     if (pass !== conf) { regError.textContent = 'Passwords do not match.'; return; }
     if (pass.length < 6) { regError.textContent = 'Password must be at least 6 characters.'; return; }
-    if (user.includes(' ')) { regError.textContent = 'Username cannot contain spaces.'; return; }
     if (user.length < 3 || user.length > 20) { regError.textContent = 'Username must be 3-20 characters.'; return; }
+    if (!/^[a-zA-Z0-9_]+$/.test(user)) { regError.textContent = 'Username can only contain letters, numbers and underscores.'; return; }
     registerBtn.disabled = true;
     registerBtn.textContent = 'CREATING...';
     try {
@@ -910,6 +943,11 @@ async function startGame() {
     emoteManager.loadManifest().catch(() => {});
     emoteManager.preloadWheel(equippedEmotes); // warm the cache for the wheel
   }
+
+  // Refresh the in-game rank badges every 15s (and once right now).
+  refreshInGameRanks();
+  if (inGameRankTimer) clearInterval(inGameRankTimer);
+  inGameRankTimer = setInterval(refreshInGameRanks, 15000);
 
   // ── FP hands ──────────────────────────────────────────────────────────────
   const fp = buildFPHands();
@@ -1613,7 +1651,6 @@ async function ensureLocalBody() {
   const label = createUsernameLabel(localUsername + ' (you)');
   label.position.set(0, 2.1, 0);
   root.add(label);
-
   // Invisible hitbox
   const hitboxGeo = new THREE.BoxGeometry(1, 2, 1);
   const hitboxMat = new THREE.MeshBasicMaterial({ visible: false });
@@ -1633,7 +1670,7 @@ async function ensureLocalBody() {
   }
 
   scene.add(root);
-  localBodyAvatar = { root, joints, animator, hitbox };
+  localBodyAvatar = { root, joints, animator, hitbox, label };
   console.log('Local body avatar created and added to scene');
 }
 
@@ -1800,9 +1837,9 @@ async function spawnRemotePlayer(id, data) {
     }
   });
 
-  // Username label above head
+  // Username label above head (with leaderboard rank badge if top 3)
   const uname = data.username || data.name || id.slice(0, 6);
-  const label = createUsernameLabel(uname);
+  const label = createUsernameLabel(uname, -1, lbRanks.get(String(uname).toLowerCase()) || 0);
   label.position.set(0, 2.1, 0);
   root.add(label);
 
@@ -1815,7 +1852,7 @@ async function spawnRemotePlayer(id, data) {
 
   scene.add(root);
   const animState = { time: 0, speed: 0, isGrounded: true, pitch: 0, velocityY: 0 };
-  remotePlayers.set(id, { root, joints, animator, animState, label, hitbox });
+  remotePlayers.set(id, { root, joints, animator, animState, label, hitbox, username: uname });
 
   scores.set(id, { kills: data.kills || 0, deaths: data.deaths || 0, name: uname });
   updateScoreboard();
