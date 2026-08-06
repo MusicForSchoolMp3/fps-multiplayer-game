@@ -124,11 +124,15 @@ export class EmoteWheel {
   }
 
   _show() {
-    if (this._root) this._root.classList.add('open');
+    if (!this._root) return;
+    this._root.style.display = 'block';
+    this._root.classList.add('open');
   }
 
   _hide() {
-    if (this._root) this._root.classList.remove('open');
+    if (!this._root) return;
+    this._root.classList.remove('open');
+    this._root.style.display = 'none';
   }
 
   _bindKeys() {
