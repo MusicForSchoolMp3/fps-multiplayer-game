@@ -267,7 +267,7 @@ function closeLeaderboard() {
 async function refreshLeaderboard() {
   if (!leaderboardList) return;
   try {
-    const res = await fetch(`${SERVER_URL}/api/leaderboard?type=${leaderboardTab}&limit=100`);
+    const res = await fetch(`${SERVER_URL}/api/leaderboard?type=${leaderboardTab}&limit=100`, { cache: 'no-store' });
     if (!res.ok) throw new Error('Leaderboard request failed');
     const data = await res.json();
     renderLeaderboard(data);
@@ -330,7 +330,7 @@ function applyRankToLabel(label, displayName, lookupName) {
 
 async function refreshInGameRanks() {
   try {
-    const res = await fetch(`${SERVER_URL}/api/leaderboard?type=global&limit=100`);
+    const res = await fetch(`${SERVER_URL}/api/leaderboard?type=global&limit=100`, { cache: 'no-store' });
     if (!res.ok) return;
     const data = await res.json();
     const next = new Map();
@@ -398,6 +398,27 @@ function showAccountMenu() {
   accountMenu.style.display = 'flex';
   lockScreen.style.display = 'none';
   settingsModal.style.display = 'none';
+  // Kills earned during a match are only stored on the server, so always
+  // refresh the lifetime total when the menu is shown (login, or back to menu).
+  refreshAccountStats();
+}
+
+// Fetch the latest account stats from the server and update the menu (and any
+// consumers of sessionTotalKills) so totals never show a stale value.
+async function refreshAccountStats() {
+  if (!sessionToken) return;
+  try {
+    const res = await fetch(`${SERVER_URL}/api/me`, {
+      headers: { 'Authorization': `Bearer ${sessionToken}` },
+      cache: 'no-store'
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (typeof data.totalKills === 'number') {
+      sessionTotalKills = data.totalKills;
+      if (menuTotalKills) menuTotalKills.textContent = sessionTotalKills || 0;
+    }
+  } catch (err) { /* ignore - keep last known value */ }
 }
 
 async function signOut() {
@@ -1120,6 +1141,7 @@ function setupMenuButtons() {
       }
       accountMenu.style.display = 'flex';
       lockScreen.style.display = 'none';
+      refreshAccountStats(); // pull the latest lifetime kills from the server
       settingsModal.style.display = 'none';
       // Reset flag after a short delay
       setTimeout(() => { openingMenu = false; }, 100);
