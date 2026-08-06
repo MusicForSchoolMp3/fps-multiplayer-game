@@ -35,6 +35,8 @@ export class NetworkManager {
     this.onHealthSync  = null; // (id, health) => {}
     this.onChatMessage = null; // (data) => {}
     this.onPlayerWeaponChange = null; // (id, weapon) => {}
+    this.onPlayerEmote = null; // (id, emoteId) => {}
+    this.onPlayerEmoteStop = null; // (id) => {}
     this.onDuplicateLogin = null; // (message) => {}
     this.onAnticheatKick = null; // (data) => {}
 
@@ -146,6 +148,14 @@ export class NetworkManager {
 
     this.socket.on('player_weapon_change', (data) => {
       if (this.onPlayerWeaponChange) this.onPlayerWeaponChange(data.id, data.weapon);
+    });
+
+    this.socket.on('player_emote', (data) => {
+      if (this.onPlayerEmote) this.onPlayerEmote(data.id, data.emoteId);
+    });
+
+    this.socket.on('player_emote_stop', (data) => {
+      if (this.onPlayerEmoteStop) this.onPlayerEmoteStop(data.id);
     });
 
     this.socket.on('duplicate_login', (data) => {

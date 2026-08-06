@@ -9,6 +9,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { readdirSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -24,6 +25,84 @@ const RESPAWN_S = 3;
 // 150x150 map except the far corners, so it is gameplay-neutral yet still
 // drops the few players a given client will never engage.
 const VIEW_RANGE = 200.0;
+
+// ════════════════════════════════════════════════════════════════════════════
+//  EMOTE MANIFEST  (auto-detected from /emote animations/)
+//  Every .glb in the folder becomes an emote. Prices come from an optional
+//  "(NNN total kills)" tag in the filename; unpriced emotes are distributed
+//  smoothly between 100 (easiest) and 10,000 (hardest). Nothing is hardcoded.
+// ════════════════════════════════════════════════════════════════════════════
+const EMOTE_DIR = join(__dirname, '..', 'emote animations');
+
+// Returns { id, name, price } parsed from a single filename. The kill cost is
+// taken from an optional "(NNN total kills)" tag; everything else is the name.
+function parseEmoteMeta(base) {
+  const priceMatch = base.match(/\(([\d,]+)\s*total\s*kills\)/i);
+  const price = priceMatch ? parseInt(priceMatch[1].replace(/,/g, ''), 10) : null;
+  const cleanName = base.replace(/\s*\([^)]*total\s*kills\)\s*$/i, '').trim() || 'Emote';
+  const id = cleanName.toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || `emote_${Math.random().toString(36).slice(2, 8)}`;
+  return { id, name: cleanName, price };
+}
+
+// Smooth exponential distribution 100 → 10,000 across n unpriced emotes.
+function distributedPrice(i, n) {
+  if (n <= 1) return 100;
+  const raw = 100 * Math.pow(100, i / (n - 1));
+  const nice = raw < 500 ? Math.round(raw / 50) * 50
+            : raw < 2500 ? Math.round(raw / 100) * 100
+            : Math.round(raw / 500) * 500;
+  return Math.max(100, Math.min(10000, nice));
+}
+
+function buildEmoteManifest() {
+  let files = [];
+  try {
+    files = readdirSync(EMOTE_DIR).filter(f => f.toLowerCase().endsWith('.glb'));
+  } catch (e) {
+    console.warn(`[Emotes] Folder not found: ${EMOTE_DIR} - no emotes available`);
+  }
+
+  const emotes = files.map((file) => {
+    const base = file.replace(/\.glb$/i, '');
+    const meta = parseEmoteMeta(base);
+    return {
+      id: meta.id,
+      file,
+      name: meta.name,
+      url: `/emote animations/${encodeURIComponent(file)}`,
+      price: meta.price, // null until auto-assigned below
+    };
+  });
+
+  // Stable ordering then auto-price anything that lacked an explicit tag.
+  emotes.sort((a, b) => a.file.localeCompare(b.file));
+  const unpriced = emotes.filter(e => e.price === null);
+  unpriced.forEach((e, i) => { e.price = distributedPrice(i, Math.max(1, unpriced.length)); });
+
+  // Push any degenerate price tags inside the allowed band.
+  for (const e of emotes) {
+    if (e.price !== null) e.price = Math.max(100, Math.min(10000, e.price));
+  }
+
+  // Final order: easiest → hardest (ascending price)
+  emotes.sort((a, b) => a.price - b.price);
+  return emotes;
+}
+
+const EMOTES = buildEmoteManifest();
+const EMOTE_BY_ID = new Map(EMOTES.map(e => [e.id, e]));
+const DEFAULT_EMOTE_ID = EMOTES.length ? EMOTES[0].id : null;
+const EMPTY_WHEEL = Array(10).fill(null);
+
+function defaultWheel() {
+  const wheel = EMPTY_WHEEL.slice();
+  if (DEFAULT_EMOTE_ID) wheel[0] = DEFAULT_EMOTE_ID;
+  return wheel;
+}
+
+console.log(`[Emotes] Detected ${EMOTES.length} emote(s): ${EMOTES.map(e => `${e.name}(${e.price})`).join(', ') || '(none)'}`);
 
 // Anticheat constants
 const MAX_SPEED = 15.0; // Maximum allowed speed (units/sec)
@@ -123,6 +202,47 @@ async function connectToMongo() {
     } catch (anticheatMigrationError) {
       console.error('Anticheat migration error:', anticheatMigrationError);
     }
+
+    // Migration: Add emote fields to existing accounts (no new accounts needed).
+    try {
+      const defaultUnlocked = DEFAULT_EMOTE_ID ? [DEFAULT_EMOTE_ID] : [];
+      const defaultWheelVal = defaultWheel();
+
+      // Accounts missing unlockedEmotes entirely
+      const withoutUnlocked = await accountsCollection.countDocuments({ unlockedEmotes: { $exists: false } });
+      if (withoutUnlocked > 0) {
+        const result = await accountsCollection.updateMany(
+          { unlockedEmotes: { $exists: false } },
+          { $set: { unlockedEmotes: defaultUnlocked, equippedEmotes: defaultWheelVal } }
+        );
+        console.log(`Emote migration (unlockedEmotes): matched ${result.matchedCount}, modified ${result.modifiedCount} accounts`);
+      }
+
+      // Accounts that have unlockedEmotes but no equippedEmotes yet
+      const withoutEquipped = await accountsCollection.countDocuments({
+        unlockedEmotes: { $exists: true },
+        equippedEmotes: { $exists: false }
+      });
+      if (withoutEquipped > 0) {
+        const result = await accountsCollection.updateMany(
+          { unlockedEmotes: { $exists: true }, equippedEmotes: { $exists: false } },
+          { $set: { equippedEmotes: defaultWheelVal } }
+        );
+        console.log(`Emote migration (equippedEmotes): matched ${result.matchedCount}, modified ${result.modifiedCount} accounts`);
+      }
+
+      // Sanity: any account with a malformed (non-array) wheel gets reset
+      const malformed = await accountsCollection.countDocuments({ equippedEmotes: { $not: { $type: 'array' } } });
+      if (malformed > 0) {
+        const result = await accountsCollection.updateMany(
+          { equippedEmotes: { $not: { $type: 'array' } } },
+          { $set: { equippedEmotes: defaultWheelVal } }
+        );
+        console.log(`Emote migration (malformed wheel): matched ${result.matchedCount}, modified ${result.modifiedCount} accounts`);
+      }
+    } catch (emoteMigrationError) {
+      console.error('Emote migration error:', emoteMigrationError);
+    }
   } catch (error) {
     console.error('MongoDB connection error:', error);
     console.log('Running without database - accounts will not persist');
@@ -174,6 +294,9 @@ function createPlayer(socket, username) {
     isDead: false,
     lastSeen: Date.now(),
     currentWeapon: 'ar',
+    // Emotes: per-account unlocked set + currently playing emote (server mirrors)
+    unlockedEmotes: new Set(),
+    currentEmote: null,
     // Anticheat tracking
     anticheatWarnings: 0,
     lastAnticheatWarning: 0,
@@ -216,6 +339,20 @@ function sanitize(p) {
 }
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// Emit an event only to players within VIEW_RANGE of `from` (bandwidth-friendly).
+function broadcastToNearby(event, payload, from) {
+  const viewSq = VIEW_RANGE * VIEW_RANGE;
+  for (const [id, p] of players) {
+    if (!from || id === from.id) continue;
+    const sock = io.sockets.sockets.get(id);
+    if (!sock || !sock.connected) continue;
+    const dx = p.x - from.x;
+    const dz = p.z - from.z;
+    if (dx * dx + dz * dz > viewSq) continue;
+    sock.emit(event, payload);
+  }
+}
 
 // Anticheat: Kick player and add warning to account
 async function kickPlayerForCheating(socket, player, reason) {
@@ -397,6 +534,8 @@ app.post('/api/register', async (req, res) => {
       passwordHash,
       totalKills: 0,
       skins: ['ar_default', 'sniper_midnight'], // Default skins
+      unlockedEmotes: DEFAULT_EMOTE_ID ? [DEFAULT_EMOTE_ID] : [], // New accounts start with the cheapest emote
+      equippedEmotes: defaultWheel(),
       createdAt: new Date(),
     });
 
@@ -446,6 +585,8 @@ app.post('/api/login', async (req, res) => {
       username: account.username,
       totalKills: account.totalKills || 0,
       skins: account.skins || ['ar_default', 'sniper_midnight'],
+      unlockedEmotes: account.unlockedEmotes || [],
+      equippedEmotes: Array.isArray(account.equippedEmotes) ? account.equippedEmotes : defaultWheel(),
       token
     });
   } catch (error) {
@@ -475,7 +616,9 @@ app.get('/api/me', async (req, res) => {
       uid: account._id.toString(),
       username: account.username,
       totalKills: account.totalKills || 0,
-      skins: account.skins || ['ar_default', 'sniper_midnight']
+      skins: account.skins || ['ar_default', 'sniper_midnight'],
+      unlockedEmotes: account.unlockedEmotes || [],
+      equippedEmotes: Array.isArray(account.equippedEmotes) ? account.equippedEmotes : defaultWheel()
     });
   } catch (error) {
     if (error.name === 'JsonWebTokenError') {
@@ -525,6 +668,84 @@ app.post('/api/validate-skin', async (req, res) => {
   }
 });
 
+// ── Emote API ────────────────────────────────────────────────────────────────
+// Public manifest (no auth needed): every emote + its price.
+app.get('/api/emotes', (req, res) => {
+  res.json({ emotes: EMOTES.map(e => ({ id: e.id, name: e.name, price: e.price, file: e.file })) });
+});
+
+// Unlock an emote using LIFETIME total kills. Kills are never deducted.
+app.post('/api/emotes/unlock', async (req, res) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  const { emoteId } = req.body || {};
+  if (!token) return res.status(401).json({ error: 'Missing token' });
+  if (!emoteId) return res.status(400).json({ error: 'Missing emoteId' });
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (!accountsCollection) return res.status(500).json({ error: 'Database not available' });
+
+    const account = await accountsCollection.findOne({ username: decoded.username });
+    if (!account) return res.status(401).json({ error: 'Account not found' });
+
+    const emote = EMOTE_BY_ID.get(emoteId);
+    if (!emote) return res.status(404).json({ error: 'Emote not found' });
+
+    const unlocked = account.unlockedEmotes || [];
+    if (unlocked.includes(emoteId)) {
+      return res.json({ success: true, alreadyUnlocked: true, unlockedEmotes: unlocked });
+    }
+
+    // Kills are a lifetime requirement only - nothing is spent.
+    const totalKills = account.totalKills || 0;
+    if (totalKills < emote.price) {
+      return res.status(400).json({ error: `Requires ${emote.price} total kills` });
+    }
+
+    const newUnlocked = [...unlocked, emoteId];
+    await accountsCollection.updateOne({ username: decoded.username }, { $set: { unlockedEmotes: newUnlocked } });
+    res.json({ success: true, unlockedEmotes: newUnlocked });
+  } catch (error) {
+    if (error.name === 'JsonWebTokenError') return res.status(401).json({ error: 'Invalid token' });
+    if (error.name === 'TokenExpiredError') return res.status(401).json({ error: 'Token expired' });
+    console.error('Unlock emote error:', error);
+    res.status(500).json({ error: 'Failed to unlock emote' });
+  }
+});
+
+// Save the equipped wheel layout (exactly 10 slots, only unlocked emotes).
+app.post('/api/emotes/equip', async (req, res) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  const { equippedEmotes } = req.body || {};
+  if (!token) return res.status(401).json({ error: 'Missing token' });
+  if (!Array.isArray(equippedEmotes) || equippedEmotes.length !== 10) {
+    return res.status(400).json({ error: 'Wheel must have exactly 10 slots' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (!accountsCollection) return res.status(500).json({ error: 'Database not available' });
+
+    const account = await accountsCollection.findOne({ username: decoded.username });
+    if (!account) return res.status(401).json({ error: 'Account not found' });
+
+    const unlocked = account.unlockedEmotes || [];
+    // Server-side validation: only unlocked emotes, unknown ids become empty slots.
+    const clean = equippedEmotes.map(v => {
+      const s = v === null || v === undefined || v === '' ? null : String(v);
+      return s && unlocked.includes(s) && EMOTE_BY_ID.has(s) ? s : null;
+    });
+
+    await accountsCollection.updateOne({ username: decoded.username }, { $set: { equippedEmotes: clean } });
+    res.json({ success: true, equippedEmotes: clean });
+  } catch (error) {
+    if (error.name === 'JsonWebTokenError') return res.status(401).json({ error: 'Invalid token' });
+    if (error.name === 'TokenExpiredError') return res.status(401).json({ error: 'Token expired' });
+    console.error('Equip emote error:', error);
+    res.status(500).json({ error: 'Failed to save emote layout' });
+  }
+});
+
 // Static file serving with proper caching headers (must be after API routes)
 app.use(express.static('dist', {
   maxAge: '1y', // Cache for 1 year for hashed assets
@@ -564,6 +785,7 @@ app.use(express.static('.', {
 io.on('connection', async (socket) => {
   const token = socket.handshake.auth.token;
   let username = null;
+  let accountUnlocked = new Set();
 
   // Validate JWT token
   if (token) {
@@ -579,6 +801,8 @@ io.on('connection', async (socket) => {
           socket.disconnect();
           return;
         }
+        // Load this account's unlocked emotes for server-side validation
+        accountUnlocked = new Set(account.unlockedEmotes || []);
         
         // Check if account is currently banned
         if (account.isBanned && account.banExpiry) {
@@ -637,6 +861,7 @@ io.on('connection', async (socket) => {
   }
 
   const player = createPlayer(socket, username);
+  player.unlockedEmotes = accountUnlocked;
   players.set(socket.id, player);
   console.log(`[+] ${player.username} connected (${socket.id})`);
 
@@ -709,6 +934,36 @@ io.on('connection', async (socket) => {
     p.isGrounded = !!snap.isGrounded;
     p.velocityY = snap.velocityY || 0; // Store vertical velocity for jump animation sync
     p.lastSeen = Date.now();
+
+    // Emotes are cancelled by ANY movement. The server enforces this so all
+    // clients stay in sync even if a player's client misbehaves.
+    if (p.currentEmote && (p.speed > 0.1 || !p.isGrounded)) {
+      p.currentEmote = null;
+      broadcastToNearby('player_emote_stop', { id: socket.id }, p);
+    }
+  });
+
+  socket.on('emote_start', (data) => {
+    const p = players.get(socket.id);
+    if (!p || p.isDead || p.isBanned) return;
+    const emoteId = (data && (data.emoteId || data.id)) || null;
+    const emote = EMOTE_BY_ID.get(emoteId);
+    if (!emote) return;
+    // Cheat guard: must actually own the emote
+    if (p.unlockedEmotes && p.unlockedEmotes.size > 0 && !p.unlockedEmotes.has(emoteId)) return;
+    if (!p.currentEmote || p.currentEmote !== emoteId) {
+      p.currentEmote = emoteId;
+      broadcastToNearby('player_emote', { id: socket.id, emoteId }, p);
+    }
+  });
+
+  socket.on('emote_stop', () => {
+    const p = players.get(socket.id);
+    if (!p) return;
+    if (p.currentEmote) {
+      p.currentEmote = null;
+      broadcastToNearby('player_emote_stop', { id: socket.id }, p);
+    }
   });
 
   socket.on('shoot', (data) => {
@@ -908,6 +1163,9 @@ io.on('connection', async (socket) => {
   });
 
   socket.on('disconnect', () => {
+    if (player.currentEmote) {
+      broadcastToNearby('player_emote_stop', { id: socket.id }, player);
+    }
     players.delete(socket.id);
     io.emit('player_leave', socket.id);
     console.log(`[-] ${player.username} disconnected`);
@@ -962,6 +1220,8 @@ async function killPlayer(victimId, killerId) {
     p.reloadStartTime = 0;
     p.lastShotTime = now;
     p.lastReloadTime = now;
+    // Emote state must not survive death/respawn
+    p.currentEmote = null;
     io.emit('player_respawn', { id: victimId, ...s });
     io.emit('health_update', { id: victimId, health: MAX_HP });
   }, RESPAWN_S * 1000);

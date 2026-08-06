@@ -7,6 +7,9 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { PlayerController }        from './PlayerController.js';
 import { NetworkManager }          from './NetworkManager.js';
 import { WeaponSystem }            from './WeaponSystem.js';
+import { EmoteManager }            from './EmoteManager.js';
+import { EmoteWheel }              from './EmoteWheel.js';
+import { EmoteShop }               from './EmoteShop.js';
 import {
   buildHumanoid,
   buildFPHands,
@@ -146,12 +149,15 @@ let sessionToken      = null;
 let sessionUsername   = null;
 let sessionTotalKills = 0;
 let ownedSkins        = ['ar_default', 'sniper_midnight']; // Default skins
+let unlockedEmotes    = []; // Emotes owned by this account
+let equippedEmotes    = Array(10).fill(null); // 10-slot wheel layout
 let isGameStarted     = false;
 let openingMenu       = false; // Flag to prevent lock screen from showing when opening menu
 
 // ── Game objects (lazy-initialized after auth) ─────────────────────────────────
 let renderer, scene, camera, clock;
 let controller, net, weapon;
+let emoteManager, emoteWheel, emoteShop;
 let fpHandsGroup;
 let fpHandsAnimator;
 let fpHandsRoot;
@@ -182,6 +188,58 @@ async function bootstrap() {
     hideAuth();
     showAccountMenu();
   }
+  initEmoteSystem();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  EMOTE SYSTEM  (created once after auth; works from the menu and in-game)
+// ══════════════════════════════════════════════════════════════════════════════
+
+function initEmoteSystem() {
+  if (emoteManager) return;
+
+  emoteManager = new EmoteManager(SERVER_URL, null, () => ({
+    animState: localAnimState,
+    controller,
+    isDead: () => isDead,
+  }));
+
+  emoteWheel = new EmoteWheel({
+    emoteManager,
+    getEquipped: () => equippedEmotes,
+    onSelect: (emoteId) => { if (emoteId) emoteManager.start(emoteId); },
+    onClose: () => {
+      // Re-lock pointer after the wheel closes so the player returns to gameplay.
+      if (!isDead && controller) controller.lock();
+    },
+    isAlive: () => !isDead,
+  });
+
+  emoteShop = new EmoteShop({
+    serverUrl: SERVER_URL,
+    emoteManager,
+    tokenProvider: () => sessionToken,
+    getAccount: () => ({ totalKills: sessionTotalKills, unlockedEmotes, equippedEmotes }),
+    setAccount: (partial) => {
+      if (partial.totalKills !== undefined) sessionTotalKills = partial.totalKills;
+      if (Array.isArray(partial.unlockedEmotes)) unlockedEmotes = partial.unlockedEmotes;
+      if (Array.isArray(partial.equippedEmotes)) equippedEmotes = partial.equippedEmotes;
+      if (emoteManager) emoteManager.preloadWheel(equippedEmotes);
+    },
+    onClose: () => {
+      // Return to the account menu.
+      if (isGameStarted) lockScreen.style.display = 'flex';
+      else accountMenu.style.display = 'flex';
+    },
+  });
+}
+
+function openEmoteShop() {
+  if (!emoteShop) return;
+  accountMenu.style.display = 'none';
+  lockScreen.style.display = 'none';
+  settingsModal.style.display = 'none';
+  emoteShop.open();
 }
 
 async function checkSession() {
@@ -206,6 +264,8 @@ async function checkSession() {
     sessionUsername = data.username;
     sessionTotalKills = data.totalKills || 0;
     ownedSkins = data.skins || ['ar_default', 'sniper_midnight'];
+    unlockedEmotes = Array.isArray(data.unlockedEmotes) ? data.unlockedEmotes : [];
+    equippedEmotes = Array.isArray(data.equippedEmotes) && data.equippedEmotes.length === 10 ? data.equippedEmotes : Array(10).fill(null);
     return true;
   } catch (error) {
     console.error('Session check error:', error);
@@ -300,6 +360,8 @@ function setupAuthUI() {
         throw new Error(data.error || 'Login failed');
       }
       saveSession(data.token, data.username, data.totalKills || 0, data.skins || null);
+      if (Array.isArray(data.unlockedEmotes)) unlockedEmotes = data.unlockedEmotes;
+      if (Array.isArray(data.equippedEmotes) && data.equippedEmotes.length === 10) equippedEmotes = data.equippedEmotes;
       hideAuth();
       showAccountMenu();
     } catch (error) {
@@ -344,6 +406,8 @@ function setupAuthUI() {
         throw new Error(loginData.error || 'Auto-login failed');
       }
       saveSession(loginData.token, loginData.username, loginData.totalKills || 0);
+      if (Array.isArray(loginData.unlockedEmotes)) unlockedEmotes = loginData.unlockedEmotes;
+      if (Array.isArray(loginData.equippedEmotes) && loginData.equippedEmotes.length === 10) equippedEmotes = loginData.equippedEmotes;
       hideAuth();
       showAccountMenu();
     } catch (error) {
@@ -769,6 +833,11 @@ async function startGame() {
   // ── Network ───────────────────────────────────────────────────────────────
   net = new NetworkManager(SERVER_URL, sessionToken, sessionUsername);
   setupNetworkCallbacks();
+  if (emoteManager) {
+    emoteManager.net = net; // emotes now broadcast via socket
+    emoteManager.loadManifest().catch(() => {});
+    emoteManager.preloadWheel(equippedEmotes); // warm the cache for the wheel
+  }
 
   // ── FP hands ──────────────────────────────────────────────────────────────
   const fp = buildFPHands();
@@ -863,6 +932,15 @@ function setupMenuButtons() {
       accountMenu.style.display = 'none';
       const gunsModal = document.getElementById('guns-modal');
       if (gunsModal) gunsModal.style.display = 'flex';
+    });
+  }
+
+  // Account Menu Emote Shop Button
+  const menuEmotesBtn = document.getElementById('menu-emotes-btn');
+  if (menuEmotesBtn) {
+    menuEmotesBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openEmoteShop();
     });
   }
 
@@ -1268,6 +1346,10 @@ function setupInput() {
   document.addEventListener('keydown', (e) => {
     if (e.code === 'Tab') { e.preventDefault(); scoreboard.style.display = 'block'; }
     if (e.code === 'KeyV') toggleThirdPerson();
+    if (e.code === 'Period') {
+      e.preventDefault();
+      if (emoteWheel && isGameStarted && !isDead) emoteWheel.toggle();
+    }
     if (e.code === 'Digit1') {
       if (weapon) weapon.switchWeapon('ar');
       const weaponArBtn = document.getElementById('weapon-ar-btn');
@@ -1500,6 +1582,7 @@ function setupNetworkCallbacks() {
   net.onDied = (data) => {
     if (data.victimId === net.localId) {
       isDead = true;
+      if (emoteManager) emoteManager.stop(); // death instantly cancels emotes
       controller.die();
       if (localBodyAvatar) localBodyAvatar.root.visible = false;
       deathOverlay.style.display = 'flex';
@@ -1544,6 +1627,7 @@ function setupNetworkCallbacks() {
       const rp = remotePlayers.get(data.id);
       if (rp) {
         rp.root.visible = true;
+        rp.animState.emote = null; // never carry an emote across death/respawn
         rp.root.position.set(data.x, 0, data.z);
       }
     }
@@ -1558,6 +1642,20 @@ function setupNetworkCallbacks() {
     if (rp && rp.root) {
       setWeaponType(rp.root, weapon);
     }
+  };
+
+  net.onPlayerEmote = (id, emoteId) => {
+    const rp = remotePlayers.get(id);
+    if (!rp) return;
+    rp.animState.emote = emoteId;
+    // Stream the emote clip so the remote avatar can actually play it (cached
+    // locally afterwards).
+    if (emoteManager) emoteManager.preload(emoteId);
+  };
+
+  net.onPlayerEmoteStop = (id) => {
+    const rp = remotePlayers.get(id);
+    if (rp) rp.animState.emote = null;
   };
 
   net.onDuplicateLogin = (message) => {
@@ -1747,7 +1845,7 @@ function gameLoop() {
     }
   }
 
-  // ── Local controller ──────────────────────────────────────────────────────
+// ── Local controller ──────────────────────────────────────────────────────
   if (!isDead) {
     controller.update(delta);
     // Debug: log controller state occasionally
@@ -1755,6 +1853,9 @@ function gameLoop() {
       console.log('Controller update - isLocked:', controller.isLocked, 'velocity:', controller.velocity, 'position:', controller.position);
     }
   }
+
+  // ── Emote management (cancel the instant the player starts moving) ────────
+  if (emoteManager) emoteManager.update();
 
   // ── Update local body avatar (always, not just in third-person) ────────────
   if (localBodyAvatar && !isDead) {

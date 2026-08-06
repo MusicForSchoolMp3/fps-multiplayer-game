@@ -232,6 +232,20 @@ async function loadAnimations() {
   return animationClips;
 }
 
+// ── Emote clip registry ─────────────────────────────────────────────────────
+// EmoteManager loads each /emote animations/ GLB and registers its clip here so
+// existing AvatarAnimator instances (built with the same `animationClips` object
+// reference) can resolve it by id at play time. No filenames are hardcoded.
+export function registerEmoteClip(id, clip) {
+  if (!id || !clip) return false;
+  animationClips[id] = clip;
+  return true;
+}
+
+export function hasEmoteClip(id) {
+  return !!animationClips[id];
+}
+
 // ── Animation State Machine Class ───────────────────────────────────────────────
 class AvatarAnimator {
   constructor(model, clips) {
@@ -616,8 +630,14 @@ export function animateAvatar(avatarData, animState, delta) {
     animState.triggerReload = false;
   }
 
-  // ── Base looping animation (locomotion / stance) ─────────────────────────
+  // ── Base looping animation (locomotion / stance / emote) ────────────────
+  // Priority: Movement > Emote > Idle.
+  //   - Movement (run/walk/jump/fall) is always chosen first and instantly
+  //     replaces any playing emote (single track crossfade = no blending).
+  //   - While standing still an active emote overrides idle completely.
+  //   - Otherwise idle plays.
   let targetAnim = 'idle';
+  const emote = animState.emote;
 
   if (!isGrounded) {
     // In the air — jump on the way up, fall on the way down
@@ -628,6 +648,9 @@ export function animateAvatar(avatarData, animState, delta) {
   } else if (speed > 0.1) {
     // Walking
     targetAnim = 'walk';
+  } else if (emote && animationClips[emote]) {
+    // Standing still + emote active → emote owns the track, idle is skipped
+    targetAnim = emote;
   }
 
   // Play looping base animation with cross-fade
