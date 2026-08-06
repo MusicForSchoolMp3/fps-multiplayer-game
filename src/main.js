@@ -164,6 +164,7 @@ let fpHandsRoot;
 let localBodyAvatar   = null; // full body for third-person view
 let localAnimState    = { time: 0, speed: 0, isGrounded: true, pitch: 0, velocityY: 0 };
 let isThirdPerson     = false;
+let emotePovOverride  = null; // POV saved while an emote forces third-person view
 let isDead            = false;
 let localHealth       = 100;
 let localColorIdx     = 0;
@@ -1475,7 +1476,13 @@ function addChatMessage(username, message) {
 
 // ── Third-person toggle ────────────────────────────────────────────────────────
 function toggleThirdPerson() {
-  isThirdPerson = !isThirdPerson;
+  applyThirdPerson(!isThirdPerson);
+}
+
+function applyThirdPerson(enabled) {
+  if (isThirdPerson === enabled) return;
+
+  isThirdPerson = enabled;
 
   // FP hands only visible in first-person
   if (fpHandsGroup) fpHandsGroup.visible = !isThirdPerson;
@@ -1860,6 +1867,20 @@ function gameLoop() {
 
   // ── Emote management (cancel the instant the player starts moving) ────────
   if (emoteManager) emoteManager.update();
+
+  // Auto-switch to third-person while an emote plays, then restore the POV the
+  // player was in before. Works for both player-initiated emotes and emotes
+  // triggered by wheel selection.
+  const emotePlaying = emoteManager ? !!emoteManager.activeEmote : false;
+  if (emotePlaying) {
+    if (emotePovOverride === null) {
+      emotePovOverride = isThirdPerson;      // remember the POV they were in
+      if (!isThirdPerson) applyThirdPerson(true);
+    }
+  } else if (emotePovOverride !== null) {
+    applyThirdPerson(emotePovOverride);      // emote ended - restore previous POV
+    emotePovOverride = null;
+  }
 
   // ── Update local body avatar (always, not just in third-person) ────────────
   if (localBodyAvatar && !isDead) {
