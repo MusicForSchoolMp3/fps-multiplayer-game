@@ -144,7 +144,7 @@ export class EmoteManager {
 }
 
 // stable emoji chosen by manifest order then by id hash
-function emojiFor(e, i) {
+function emojiForEmote(e, i) {
   const seed = i * 7 + e.id.length;
   return EMOJI_PALETTE[seed % EMOJI_PALETTE.length];
 }

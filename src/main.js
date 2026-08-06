@@ -1330,8 +1330,9 @@ function setupInput() {
       lockScreen.style.display = 'none';
     } else if (!isDead) {
       // Pointer lock lost - show lock screen
-      // Don't show lock screen if we're opening the menu
+      // Don't show lock screen if we're opening the menu or the emote wheel
       if (openingMenu) return;
+      if (emoteWheel && emoteWheel.open) return; // wheel is up - re-lock handles hiding later
       // Only show lock screen if neither menu nor settings are open
       // Use a small delay to allow menu to open first
       setTimeout(() => {
@@ -1348,7 +1349,10 @@ function setupInput() {
     if (e.code === 'KeyV') toggleThirdPerson();
     if (e.code === 'Period') {
       e.preventDefault();
-      if (emoteWheel && isGameStarted && !isDead) emoteWheel.toggle();
+      if (emoteWheel && isGameStarted && !isDead) {
+        lockScreen.style.display = 'none'; // don't show the "click to play" overlay
+        emoteWheel.toggle();
+      }
     }
     if (e.code === 'Digit1') {
       if (weapon) weapon.switchWeapon('ar');
