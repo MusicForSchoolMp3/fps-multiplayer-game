@@ -39,6 +39,7 @@ export class NetworkManager {
     this.onPlayerEmoteStop = null; // (id) => {}
     this.onDuplicateLogin = null; // (message) => {}
     this.onAnticheatKick = null; // (data) => {}
+    this.onLeaderboardUpdate = null; // (standings) => {}
 
     this._setupEvents();
 
@@ -164,6 +165,10 @@ export class NetworkManager {
 
     this.socket.on('anticheat_kick', (data) => {
       if (this.onAnticheatKick) this.onAnticheatKick(data);
+    });
+
+    this.socket.on('leaderboard_update', (standings) => {
+      if (this.onLeaderboardUpdate) this.onLeaderboardUpdate(standings);
     });
   }
 

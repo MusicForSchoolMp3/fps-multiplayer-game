@@ -121,6 +121,63 @@ function currentMonthKey() {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
+// ── Live leaderboard (in-memory cache, pushed to clients constantly) ───────────
+const LEADERBOARD_LIMIT = 100;
+const lbIndex    = new Map(); // username -> { totalKills, monthKey, monthKills }
+let   lbStandup  = { global: [], monthly: [], month: currentMonthKey() };
+let   lbDirty    = true;
+
+function rebuildLiveLeaderboard() {
+  const users = [];
+  for (const [username, d] of lbIndex) {
+    if (isBlacklisted(username)) continue; // blocked accounts never appear
+    users.push({
+      username,
+      totalKills: d.totalKills || 0,
+      monthKey: d.monthKey,
+      monthKills: d.monthKills || 0,
+    });
+  }
+  const mKey = currentMonthKey();
+  const global = users
+    .slice()
+    .sort((a, b) => (b.totalKills - a.totalKills) || a.username.localeCompare(b.username))
+    .slice(0, LEADERBOARD_LIMIT)
+    .map((d, i) => ({ rank: i + 1, username: d.username, kills: d.totalKills }));
+  const monthly = users
+    .filter(d => d.monthKey === mKey)
+    .sort((a, b) => (b.monthKills - a.monthKills) || a.username.localeCompare(b.username))
+    .slice(0, LEADERBOARD_LIMIT)
+    .map((d, i) => ({ rank: i + 1, username: d.username, kills: d.monthKills }));
+  lbStandup = { global, monthly, month: mKey };
+  lbDirty = false;
+  return lbStandup;
+}
+
+// Load every account's kill counters into the in-memory index (used at boot and
+// for periodic re-sync so new registrations / out-of-band changes are picked up).
+async function loadLiveLeaderboard() {
+  if (!accountsCollection) return;
+  try {
+    const docs = await accountsCollection
+      .find({}, { projection: { username: 1, totalKills: 1, monthKey: 1, monthKills: 1 } })
+      .toArray();
+    lbIndex.clear();
+    for (const d of docs) {
+      lbIndex.set(d.username, {
+        totalKills: d.totalKills || 0,
+        monthKey: d.monthKey,
+        monthKills: d.monthKills || 0,
+      });
+    }
+    lbDirty = true;
+    rebuildLiveLeaderboard();
+    console.log(`[Leaderboard] Loaded ${lbIndex.size} accounts into live leaderboard`);
+  } catch (error) {
+    console.error('Leaderboard load error:', error);
+  }
+}
+
 // Weapon configurations for server-side validation
 const WEAPONS = {
   ar: {
@@ -255,6 +312,9 @@ async function connectToMongo() {
     } catch (emoteMigrationError) {
       console.error('Emote migration error:', emoteMigrationError);
     }
+
+    // Load every account's kills into the live leaderboard index.
+    await loadLiveLeaderboard();
   } catch (error) {
     console.error('MongoDB connection error:', error);
     console.log('Running without database - accounts will not persist');
@@ -554,6 +614,14 @@ app.post('/api/register', async (req, res) => {
       equippedEmotes: defaultWheel(),
       createdAt: new Date(),
     });
+
+    // Include the fresh account in the live leaderboard index right away.
+    lbIndex.set(username.toLowerCase(), {
+      totalKills: 0,
+      monthKey: currentMonthKey(),
+      monthKills: 0,
+    });
+    lbDirty = true;
 
     res.json({ success: true });
   } catch (error) {
@@ -928,6 +996,9 @@ io.on('connection', async (socket) => {
     players: existing,
   });
 
+  // Send the current live standings so rank badges work immediately on join.
+  socket.emit('leaderboard_update', lbStandup);
+
   socket.broadcast.emit('player_join', { id: socket.id, ...sanitize(player) });
 
   socket.on('move', (snap) => {
@@ -1281,6 +1352,15 @@ async function killPlayer(victimId, killerId) {
             { username: killer.username },
             { $inc: { monthKills: 1 } }
           );
+
+          // Mirror the write into the live leaderboard index and flag a rebuild,
+          // so clients get pushed the updated standings within ~2s.
+          const prev = lbIndex.get(killer.username) || { totalKills: 0, monthKey: null, monthKills: 0 };
+          prev.totalKills = (account.totalKills || 0) + 1;
+          prev.monthKey   = monthKey;
+          prev.monthKills = (prev.monthKey === monthKey ? (prev.monthKills || 0) : 0) + 1;
+          lbIndex.set(killer.username, prev);
+          lbDirty = true;
         }
       } catch (error) {
         console.error('Failed to save kills:', error);
@@ -1372,3 +1452,22 @@ setInterval(() => {
 http.listen(PORT, () => {
   console.log(`Test server → http://localhost:${PORT}`);
 });
+
+// ── Live leaderboard broadcast ─────────────────────────────────────────────────
+// Fast path: as soon as a kill changes the standings, rebuild the top-100 and
+// push it to every connected client (players get replaced in real time).
+setInterval(() => {
+  if (!lbDirty) return;
+  rebuildLiveLeaderboard();
+  io.emit('leaderboard_update', lbStandup);
+}, 2000);
+
+// Safety net: periodically re-sync from the DB (catches new registrations and
+// any out-of-band changes), then broadcast if anything differs.
+setInterval(async () => {
+  const before = JSON.stringify(lbStandup);
+  await loadLiveLeaderboard();
+  if (before !== JSON.stringify(lbStandup)) {
+    io.emit('leaderboard_update', lbStandup);
+  }
+}, 30000);

@@ -1834,6 +1834,31 @@ function setupNetworkCallbacks() {
     alert(message);
     signOut();
   };
+
+  // Live leaderboard pushes: server sends the full standings whenever kills
+  // change the board. Update rank badges immediately and re-render the modal
+  // if it is currently open (no 5s poll wait needed).
+  net.onLeaderboardUpdate = (standings) => {
+    if (!standings) return;
+    if (Array.isArray(standings.global)) {
+      const next = new Map();
+      for (const e of standings.global) next.set(String(e.username).toLowerCase(), e.rank);
+      lbRanks = next;
+      for (const rp of remotePlayers.values()) {
+        if (rp && rp.label) applyRankToLabel(rp.label, rp.username, rp.username);
+      }
+      if (localBodyAvatar && localBodyAvatar.label) {
+        applyRankToLabel(localBodyAvatar.label, localUsername + ' (you)', localUsername);
+      }
+    }
+    if (leaderboardModal && leaderboardModal.style.display !== 'none') {
+      const payload = {
+        type: leaderboardTab,
+        entries: leaderboardTab === 'monthly' ? (standings.monthly || []) : (standings.global || []),
+      };
+      renderLeaderboard(payload);
+    }
+  };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
