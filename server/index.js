@@ -305,6 +305,7 @@ function createPlayer(socket, username) {
     // Weapon anticheat tracking
     lastShotTime: now,
     lastReloadTime: now,
+    lastReloadWeapon: 'ar', // which weapon the last reload_start belonged to
     isReloading: false,
     reloadStartTime: 0,
     // Previous state for delta compression
@@ -671,7 +672,7 @@ app.post('/api/validate-skin', async (req, res) => {
 // ── Emote API ────────────────────────────────────────────────────────────────
 // Public manifest (no auth needed): every emote + its price.
 app.get('/api/emotes', (req, res) => {
-  res.json({ emotes: EMOTES.map(e => ({ id: e.id, name: e.name, price: e.price, file: e.file })) });
+  res.json({ emotes: EMOTES.map(e => ({ id: e.id, name: e.name, price: e.price, file: e.file, url: e.url })) });
 });
 
 // Unlock an emote using LIFETIME total kills. Kills are never deducted.
@@ -1083,6 +1084,17 @@ io.on('connection', async (socket) => {
     // Store current weapon for this player
     p.currentWeapon = data.weapon || 'ar';
     
+    // Swapping weapons legitimately cancels any in-progress reload and resets
+    // the reload timer window (a reload of the *new* gun must not be compared
+    // against the *old* gun's reload timestamp - that caused false bans when
+    // switching guns and reloading quickly).
+    p.isReloading = false;
+    p.reloadStartTime = 0;
+    p.lastReloadWeapon = p.currentWeapon;
+    const now = Date.now();
+    p.lastReloadTime = now;
+    p.lastShotTime = now;
+    
     // Broadcast to other players
     socket.broadcast.emit('player_weapon_change', {
       id: socket.id,
@@ -1109,8 +1121,10 @@ io.on('connection', async (socket) => {
     const timeSinceLastReload = now - p.lastReloadTime;
     const minReloadTime = weaponConfig.reloadTime * 1000; // Convert to milliseconds
     
-    // Check if reload is happening too quickly
-    if (p.isReloading && timeSinceLastReload < minReloadTime * 0.8) {
+    // Check if reload is happening too quickly. Only counts as a violation when
+    // the SAME weapon is being reloaded again (switching guns mid-reload is
+    // legitimate and must not trip the anti-cheat).
+    if (p.isReloading && p.lastReloadWeapon === p.currentWeapon && timeSinceLastReload < minReloadTime * 0.8) {
       p.anticheatWarnings++;
       p.lastAnticheatWarning = now;
       console.log(`[Anticheat] Reload time violation for ${p.username}: ${timeSinceLastReload}ms < ${minReloadTime * 0.8}ms (Warning ${p.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
@@ -1125,6 +1139,7 @@ io.on('connection', async (socket) => {
     p.isReloading = true;
     p.reloadStartTime = now;
     p.lastReloadTime = now;
+    p.lastReloadWeapon = p.currentWeapon;
   });
 
   socket.on('reload_complete', (data) => {
@@ -1143,6 +1158,12 @@ io.on('connection', async (socket) => {
     
     // Anticheat: Validate reload completion time
     const now = Date.now();
+    // reloadStartTime is 0 when the weapon was switched mid-reload, so there is
+    // no valid duration to validate against - never flag that.
+    if (p.reloadStartTime === 0) {
+      p.isReloading = false;
+      return;
+    }
     const reloadDuration = now - p.reloadStartTime;
     const expectedReloadTime = weaponConfig.reloadTime * 1000; // Convert to milliseconds
     
@@ -1220,6 +1241,7 @@ async function killPlayer(victimId, killerId) {
     p.reloadStartTime = 0;
     p.lastShotTime = now;
     p.lastReloadTime = now;
+    p.lastReloadWeapon = p.currentWeapon;
     // Emote state must not survive death/respawn
     p.currentEmote = null;
     io.emit('player_respawn', { id: victimId, ...s });
