@@ -109,6 +109,18 @@ const MAX_SPEED = 15.0; // Maximum allowed speed (units/sec)
 const ANTICHEAT_WARNINGS_THRESHOLD = 3; // Number of warnings before kick
 const ANTICHEAT_BAN_DURATION = 300000; // 5 minutes in milliseconds
 
+// ── Leaderboard helpers ────────────────────────────────────────────────────────
+// Testing blacklist: these accounts are locked out of the game.
+const BLACKLISTED_USERS = ['ben', 'dom'];
+function isBlacklisted(username) {
+  return BLACKLISTED_USERS.includes((username || '').toLowerCase());
+}
+// Current calendar month key, used to bucket "monthly kills".
+function currentMonthKey() {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
 // Weapon configurations for server-side validation
 const WEAPONS = {
   ar: {
@@ -534,6 +546,8 @@ app.post('/api/register', async (req, res) => {
       username: username.toLowerCase(),
       passwordHash,
       totalKills: 0,
+      monthKey: currentMonthKey(),
+      monthKills: 0,
       skins: ['ar_default', 'sniper_midnight'], // Default skins
       unlockedEmotes: DEFAULT_EMOTE_ID ? [DEFAULT_EMOTE_ID] : [], // New accounts start with the cheapest emote
       equippedEmotes: defaultWheel(),
@@ -572,6 +586,11 @@ app.post('/api/login', async (req, res) => {
     const validPassword = await bcrypt.compare(password, account.passwordHash);
     if (!validPassword) {
       return res.status(401).json({ error: 'Invalid username or password' });
+    }
+
+    // Block blacklisted accounts from the game.
+    if (isBlacklisted(account.username)) {
+      return res.status(403).json({ error: 'This account is blacklisted' });
     }
 
     // Generate JWT token
@@ -747,6 +766,44 @@ app.post('/api/emotes/equip', async (req, res) => {
   }
 });
 
+// ── Leaderboard ────────────────────────────────────────────────────────────────
+// GET /api/leaderboard?type=global|monthly&limit=50
+// Returns the top accounts by kills (excluding blacklisted accounts), in real
+// time from the database.
+app.get('/api/leaderboard', async (req, res) => {
+  if (!accountsCollection) return res.status(500).json({ error: 'Database not available' });
+
+  const type = req.query.type === 'monthly' ? 'monthly' : 'global';
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
+
+  try {
+    // Query: exclude blacklisted, pick the right kill counter.
+    const filter = { username: { $nin: BLACKLISTED_USERS } };
+    const sortField = type === 'monthly' ? 'monthKills' : 'totalKills';
+    if (type === 'monthly') filter.monthKey = currentMonthKey(); // only current-month kills
+
+    const docs = await accountsCollection
+      .find(filter, { projection: { username: 1, totalKills: 1, monthKey: 1, monthKills: 1 } })
+      .sort({ [sortField]: -1, _id: 1 })
+      .limit(limit)
+      .toArray();
+
+    let prevKills = Infinity;
+    let rank = 0;
+    const list = docs.map((acc) => {
+      const kills = type === 'monthly' ? (acc.monthKills || 0) : (acc.totalKills || 0);
+      // Tied scores share the same rank.
+      if (kills < prevKills) { rank++; prevKills = kills; }
+      return { rank, username: acc.username, kills };
+    });
+
+    res.json({ type, month: currentMonthKey(), entries: list });
+  } catch (error) {
+    console.error('Leaderboard error:', error);
+    res.status(500).json({ error: 'Failed to load leaderboard' });
+  }
+});
+
 // Static file serving with proper caching headers (must be after API routes)
 app.use(express.static('dist', {
   maxAge: '1y', // Cache for 1 year for hashed assets
@@ -793,6 +850,14 @@ io.on('connection', async (socket) => {
     try {
       const decoded = jwt.verify(token, JWT_SECRET);
       username = decoded.username;
+
+      // Reject blacklisted accounts outright (testing).
+      if (isBlacklisted(username)) {
+        console.log(`[-] Rejected connection: ${username} is blacklisted`);
+        socket.emit('blacklisted', { message: 'This account is blacklisted' });
+        socket.disconnect();
+        return;
+      }
 
       // Verify account still exists in database
       if (accountsCollection) {
@@ -1213,6 +1278,21 @@ async function killPlayer(victimId, killerId) {
           await accountsCollection.updateOne(
             { username: killer.username },
             { $set: { totalKills: newTotalKills } }
+          );
+
+          // Track monthly kills. If the stored month is stale (including legacy
+          // accounts with no monthKey), reset the counter for the current month
+          // first, then always increment by one.
+          const monthKey = currentMonthKey();
+          if (account.monthKey !== monthKey) {
+            await accountsCollection.updateOne(
+              { username: killer.username, monthKey: { $ne: monthKey } },
+              { $set: { monthKey, monthKills: 0 } }
+            );
+          }
+          await accountsCollection.updateOne(
+            { username: killer.username },
+            { $inc: { monthKills: 1 } }
           );
         }
       } catch (error) {

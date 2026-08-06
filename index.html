@@ -70,6 +70,7 @@
       <canvas id="menu-avatar-canvas"></canvas>
       <div class="char-panel-weapon-tag" id="char-weapon-tag">AR</div>
       <button id="menu-loadout-btn" class="loadout-btn">🎨 SKINS</button>
+      <button id="menu-leaderboard-btn" class="loadout-btn">🏆 LEADERBOARD</button>
     </div>
 
     <!-- ── CENTER: Main Menu Card ─────────────────────────────────────────── -->
@@ -206,6 +207,23 @@
         <div class="update-log-header">� UPDATE LOG</div>
         <div class="update-log-content" id="settings-update-log-content"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- ─── Leaderboard Modal ──────────────────────────────────────────────── -->
+  <div id="leaderboard-modal" style="display:none;">
+    <div id="leaderboard-backdrop"></div>
+    <div id="leaderboard-panel">
+      <div id="leaderboard-header">
+        <div id="leaderboard-title">🏆 LEADERBOARD</div>
+        <button id="leaderboard-close-btn" class="skins-close">✕</button>
+      </div>
+      <div id="leaderboard-tabs">
+        <button id="lib-tab-global" class="skins-tab active" data-type="global">🌐 GLOBAL</button>
+        <button id="lib-tab-monthly" class="skins-tab" data-type="monthly">📅 MONTHLY</button>
+      </div>
+      <div id="leaderboard-list"><!-- populated by JS --></div>
+      <div id="leaderboard-meta"></div>
     </div>
   </div>
 

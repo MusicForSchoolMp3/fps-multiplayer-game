@@ -47,7 +47,7 @@ const UPDATE_LOG = [
     date: '2026-08-05',
     items: [
       'COMING SOON: Brand new map, ranks, more weapons, and both character and weapon skins',
-      'Fixed animations',
+      'Added monthly/global leaderboard (total kills)',
       'Added unlockable emotes',
       'Added emote wheel',
       'Added anticheat',
@@ -117,6 +117,15 @@ const settingHeadBob     = document.getElementById('setting-head-bob');
 const settingsResumeBtn  = document.getElementById('settings-resume-btn');
 const settingsCloseBtn   = document.getElementById('settings-close-btn');
 const settingsSignoutBtn = document.getElementById('settings-signout-btn');
+
+// ─── Leaderboard refs ──────────────────────────────────────────────────────────
+const leaderboardModal   = document.getElementById('leaderboard-modal');
+const leaderboardList    = document.getElementById('leaderboard-list');
+const leaderboardMeta    = document.getElementById('leaderboard-meta');
+const libTabGlobal       = document.getElementById('lib-tab-global');
+const libTabMonthly      = document.getElementById('lib-tab-monthly');
+let leaderboardTab       = 'global';
+let leaderboardTimer     = null; // polling interval while the modal is open
 
 // ─── Auth UI refs ──────────────────────────────────────────────────────────────
 const tabLogin        = document.getElementById('tab-login');
@@ -230,6 +239,79 @@ function openEmoteShop() {
   lockScreen.style.display = 'none';
   settingsModal.style.display = 'none';
   emoteShop.open();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  LEADERBOARD  (global + monthly kills, polled in real time while open)
+// ══════════════════════════════════════════════════════════════════════════════
+
+function openLeaderboard() {
+  accountMenu.style.display = 'none';
+  lockScreen.style.display = 'none';
+  settingsModal.style.display = 'none';
+  if (leaderboardModal) leaderboardModal.style.display = 'flex';
+  refreshLeaderboard();
+  // Live update while open.
+  if (leaderboardTimer === null) leaderboardTimer = setInterval(refreshLeaderboard, 5000);
+}
+
+function closeLeaderboard() {
+  if (leaderboardTimer !== null) { clearInterval(leaderboardTimer); leaderboardTimer = null; }
+  if (leaderboardModal) leaderboardModal.style.display = 'none';
+  if (!isGameStarted) accountMenu.style.display = 'flex';
+}
+
+async function refreshLeaderboard() {
+  if (!leaderboardList) return;
+  try {
+    const res = await fetch(`${SERVER_URL}/api/leaderboard?type=${leaderboardTab}`);
+    if (!res.ok) throw new Error('Leaderboard request failed');
+    const data = await res.json();
+    renderLeaderboard(data);
+  } catch (err) {
+    leaderboardList.innerHTML = '<div class="lib-empty">Could not load leaderboard.</div>';
+  }
+}
+
+function formatMonthLabel(monthKey) {
+  if (!monthKey) return '';
+  const [y, m] = monthKey.split('-').map(Number);
+  const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${names[m - 1]} ${y}`;
+}
+
+function renderLeaderboard(data) {
+  const type = data.type || leaderboardTab;
+  const entries = Array.isArray(data.entries) ? data.entries : [];
+  const metaPrefix = type === 'monthly'
+    ? (data.month ? `${formatMonthLabel(data.month)} ` : '') + 'Top players '
+    : 'All-time ';
+
+  if (leaderboardMeta) {
+    leaderboardMeta.textContent = entries.length
+      ? `${metaPrefix}by kills`
+      : 'No entries yet this month.';
+  }
+
+  if (!entries.length) {
+    leaderboardList.innerHTML = '<div class="rank-empty">No players on the board yet.</div>';
+    return;
+  }
+
+  leaderboardList.innerHTML = entries.map((e) => {
+    const isMe = sessionUsername && e.username.toLowerCase() === sessionUsername.toLowerCase();
+    const medal = e.rank === 1 ? '🥇' : e.rank === 2 ? '🥈' : e.rank === 3 ? '🥉' : e.rank;
+    return `
+      <div class="rank-row${isMe ? ' me' : ''}">
+        <div class="rank-medal">${medal}</div>
+        <div class="rank-name">${escapeHtml(e.username)}${isMe ? ' <span class="rank-you">(you)</span>' : ''}</div>
+        <div class="rank-kills">${e.kills.toLocaleString()}</div>
+      </div>`;
+  }).join('');
+}
+
+function escapeHtml(str) {
+  return String(str ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 
 async function checkSession() {
@@ -933,6 +1015,31 @@ function setupMenuButtons() {
       openEmoteShop();
     });
   }
+
+  // Account Menu Leaderboard Button
+  const menuLeaderboardBtn = document.getElementById('menu-leaderboard-btn');
+  if (menuLeaderboardBtn) {
+    menuLeaderboardBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openLeaderboard();
+    });
+  }
+
+  // Leaderboard modal controls
+  const leaderboardCloseBtn = document.getElementById('leaderboard-close-btn');
+  if (leaderboardCloseBtn) leaderboardCloseBtn.addEventListener('click', closeLeaderboard);
+  const leaderboardBackdrop = document.getElementById('leaderboard-backdrop');
+  if (leaderboardBackdrop) leaderboardBackdrop.addEventListener('click', closeLeaderboard);
+
+  const setLeaderboardTab = (type) => {
+    if (leaderboardTab === type) return;
+    leaderboardTab = type;
+    if (libTabGlobal) libTabGlobal.classList.toggle('active', type === 'global');
+    if (libTabMonthly) libTabMonthly.classList.toggle('active', type === 'monthly');
+    refreshLeaderboard();
+  };
+  if (libTabGlobal) libTabGlobal.addEventListener('click', () => setLeaderboardTab('global'));
+  if (libTabMonthly) libTabMonthly.addEventListener('click', () => setLeaderboardTab('monthly'));
 
   // Account Menu Settings Button
   if (menuSettingsBtn) {
