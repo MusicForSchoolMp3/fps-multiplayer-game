@@ -1252,18 +1252,19 @@ async function killPlayer(victimId, killerId) {
   victim.health = 0;
   if (killer) {
     killer.kills++;
-    // Save kills to MongoDB with server-side validation
+    // Save kills to MongoDB (server-authoritative).
     if (accountsCollection && killer.username) {
       try {
-        // Get current total kills from database to prevent tampering
+        // Get current account (needed for the monthly-bucket check).
         const account = await accountsCollection.findOne({ username: killer.username });
         if (account) {
-          // Use max of server-side count and database count to prevent rollback
-          const dbKills = account.totalKills || 0;
-          const newTotalKills = Math.max(killer.kills, dbKills);
+          // Always increment the lifetime counter by one per kill. Previously we
+          // wrote max(sessionKills, dbTotal); sessionKills resets to 0 on every
+          // login, so once the DB total passed the session count the number could
+          // never grow again - kills appeared frozen on subsequent sessions.
           await accountsCollection.updateOne(
             { username: killer.username },
-            { $set: { totalKills: newTotalKills } }
+            { $inc: { totalKills: 1 } }
           );
 
           // Track monthly kills. If the stored month is stale (including legacy
