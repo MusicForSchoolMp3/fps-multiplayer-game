@@ -1,7 +1,9 @@
 // Server with MongoDB authentication
 import { createServer } from 'http';
 import express from 'express';
+import compression from 'compression';
 import { Server } from 'socket.io';
+import msgpackParser from 'socket.io-msgpack-parser';
 import { MongoClient } from 'mongodb';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
@@ -15,6 +17,13 @@ const PORT = process.env.PORT || 3001;
 const TICK_MS = 1000 / 18; // Reduced from 30Hz to 18Hz for bandwidth optimization
 const MAX_HP = 100;
 const RESPAWN_S = 3;
+
+// Interest management: only replicate players within this horizontal radius.
+// The sniper has maxRange 200, so this must not dip below that or legitimate
+// long-range shots would stop rendering. 200 covers essentially the whole
+// 150x150 map except the far corners, so it is gameplay-neutral yet still
+// drops the few players a given client will never engage.
+const VIEW_RANGE = 200.0;
 
 // Anticheat constants
 const MAX_SPEED = 15.0; // Maximum allowed speed (units/sec)
@@ -332,6 +341,7 @@ const app = express();
 const http = createServer(app);
 const io = new Server(http, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
+  parser: msgpackParser, // Binary MessagePack wire format (replaces verbose JSON)
 });
 
 app.use((req, res, next) => {
@@ -343,6 +353,13 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+
+// Brotli/gzip compression for every text & JSON response (API + static).
+// Silent no-op for already-compressed binary assets (glb/fbx).
+app.use(compression({
+  threshold: 512, // compress even small responses
+  brotli: { enabled: true, quality: 5 }, // brotli preferred by modern browsers
+}));
 
 // API endpoints for account management (must be before static files)
 app.post('/api/register', async (req, res) => {
@@ -526,14 +543,20 @@ app.use(express.static('dist', {
 }));
 
 app.use(express.static('.', {
-  maxAge: '1h', // Shorter cache for root directory files (FBX models may change)
+  maxAge: '30d', // Longer cache for heavy binary assets (they never change at runtime)
   etag: true,
   lastModified: true,
   setHeaders: (res, filePath) => {
     const ext = filePath.split('.').pop().toLowerCase();
-    // Cache model files for 1 day
-    if (['fbx', 'glb', 'gltf'].includes(ext)) {
-      res.setHeader('Cache-Control', 'public, max-age=86400');
+    // Cache model files for 30 days - they are immutable at runtime.
+    // Previously 1h/1d meant every fresh or expired client re-downloaded
+    // the 38MB Character.glb + 15MB sniper GLBs.
+    if (['fbx', 'glb', 'gltf', 'bin', 'ktx2', 'drc'].includes(ext)) {
+      res.setHeader('Cache-Control', 'public, max-age=2592000');
+    }
+    // Text assets at the repo root (JSON, fonts) can be compressed + cached
+    if (['json', 'css', 'js', 'txt'].includes(ext)) {
+      res.setHeader('Cache-Control', 'public, max-age=604800');
     }
   }
 }));
@@ -751,7 +774,10 @@ io.on('connection', async (socket) => {
     // Use server-side damage value to prevent tampering
     const serverDamage = expectedDamage;
 
-    io.emit('player_shot', {
+    // Broadcast tracer to everyone EXCEPT the shooter (they already see the
+    // local tracer). Previously this was io.emit (sent to the shooter too,
+    // who ignored it) - saving one redundant N-of-N delivery per shot.
+    socket.broadcast.emit('player_shot', {
       shooterId: socket.id,
       origin: data.origin,
       dir: data.dir,
@@ -770,7 +796,10 @@ io.on('connection', async (socket) => {
       socket.emit('player_hit', {
         shooterId: socket.id, victimId: data.hitId, damage: serverDamage, health: victim.health,
       });
-      io.emit('health_update', { id: data.hitId, health: victim.health });
+      // Only the victim needs their health bar updated. Previously emitted to
+      // every client on every shot - the health value is also already present
+      // in the victim's player_hit payload, so this is purely the HUD sync.
+      io.to(data.hitId).emit('health_update', { id: data.hitId, health: victim.health });
 
       if (victim.health <= 0) killPlayer(data.hitId, socket.id);
     }
@@ -939,9 +968,9 @@ async function killPlayer(victimId, killerId) {
 }
 
 setInterval(() => {
-  const state = {};
+  // ── Phase 1: compute deltas once per player (per tick) ──────────────────
+  const deltas = new Map();
   for (const [id, p] of players) {
-    // Create delta update with quantization
     const currentState = {
       x: p.x, y: p.y, z: p.z,
       yaw: p.yaw, pitch: p.pitch,
@@ -952,18 +981,42 @@ setInterval(() => {
     };
 
     const delta = createDeltaUpdate(p._prev, currentState);
-    
+
     // If there are changes, send delta and update previous state
     if (delta) {
-      state[id] = delta;
+      deltas.set(id, delta);
       // Update previous state for next comparison
       p._prev = { ...currentState };
     }
   }
-  
-  // Only send if there are updates to send
-  if (Object.keys(state).length > 0) {
-    io.emit('world_state', state);
+
+  if (deltas.size === 0) return;
+
+  // ── Phase 2: per-recipient interest management ───────────────────────────
+  // Instead of broadcasting every moving player to EVERY connected client
+  // (O(N^2) traffic), each recipient only receives deltas for players that
+  // are actually close enough to be seen on their screen.
+  const viewSq = VIEW_RANGE * VIEW_RANGE;
+  for (const [recipientId, recipient] of players) {
+    const sock = io.sockets.sockets.get(recipientId);
+    if (!sock || !sock.connected) continue;
+
+    const out = {};
+    for (const [pid, delta] of deltas) {
+      if (pid === recipientId) continue;
+      const other = players.get(pid);
+      if (!other) continue;
+
+      const dx = other.x - recipient.x;
+      const dz = other.z - recipient.z;
+      if (dx * dx + dz * dz > viewSq) continue;
+
+      out[pid] = delta;
+    }
+
+    if (Object.keys(out).length > 0) {
+      sock.emit('world_state', out);
+    }
   }
 }, TICK_MS);
 

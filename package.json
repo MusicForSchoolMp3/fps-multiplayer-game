@@ -13,12 +13,14 @@
   "dependencies": {
     "bcrypt": "^5.1.1",
     "cannon-es": "^0.20.0",
+    "compression": "^1.8.1",
     "express": "^4.19.2",
     "firebase": "^12.16.0",
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.21.0",
     "socket.io": "^4.7.5",
     "socket.io-client": "^4.7.5",
+    "socket.io-msgpack-parser": "^3.0.2",
     "three": "^0.165.0",
     "vite": "^5.3.1"
   },

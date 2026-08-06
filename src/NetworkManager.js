@@ -2,13 +2,14 @@
 // Handles all socket.io communication, entity interpolation, and client prediction.
 
 import { io } from 'socket.io-client';
+import msgpackParser from 'socket.io-msgpack-parser';
 
 const INTERP_DELAY = 100; // ms of interpolation buffer
 const MOVE_INTERVAL = 1000 / 18; // 18Hz movement update rate (reduced from 20Hz)
 
 export class NetworkManager {
   constructor(serverUrl, token, username) {
-    this.socket    = io(serverUrl, { transports: ['websocket'], auth: { token, username } });
+    this.socket    = io(serverUrl, { transports: ['websocket'], auth: { token, username }, parser: msgpackParser });
     this.localId   = null;
     this.connected = false;
     this.ping      = 0;

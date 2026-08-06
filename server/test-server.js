@@ -1,12 +1,16 @@
 // Simple test server without Firebase authentication
 import { createServer } from 'http';
 import express from 'express';
+import compression from 'compression';
 import { Server } from 'socket.io';
+import msgpackParser from 'socket.io-msgpack-parser';
 
 const PORT = process.env.PORT || 3001;
 const TICK_MS = 1000 / 30;
 const MAX_HP = 100;
 const RESPAWN_S = 3;
+// Match client/server wire parser. Must stay in sync with the real server.
+const VIEW_RANGE = 200.0;
 
 const SPAWNS = [
   { x: -60, y: 0, z: 0 },
@@ -72,7 +76,10 @@ const app = express();
 const http = createServer(app);
 const io = new Server(http, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
+  parser: msgpackParser,
 });
+
+app.use(compression({ threshold: 512, brotli: { enabled: true, quality: 5 } }));
 
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
@@ -142,13 +149,13 @@ io.on('connection', (socket) => {
       const damage = clamp(data.damage || 25, 1, 100);
       victim.health = Math.max(0, victim.health - damage);
 
-      io.to(data.hitId).emit('player_hit', {
-        shooterId: socket.id, victimId: data.hitId, damage, health: victim.health,
-      });
-      socket.emit('player_hit', {
-        shooterId: socket.id, victimId: data.hitId, damage, health: victim.health,
-      });
-      io.emit('health_update', { id: data.hitId, health: victim.health });
+io.to(data.hitId).emit('player_hit', {
+      shooterId: socket.id, victimId: data.hitId, damage, health: victim.health,
+    });
+    socket.emit('player_hit', {
+      shooterId: socket.id, victimId: data.hitId, damage, health: victim.health,
+    });
+    io.to(data.hitId).emit('health_update', { id: data.hitId, health: victim.health });
 
       if (victim.health <= 0) killPlayer(data.hitId, socket.id);
     }
@@ -193,17 +200,36 @@ function killPlayer(victimId, killerId) {
 }
 
 setInterval(() => {
-  const state = {};
+  // Per-recipient interest management: only forward moving/delta players that
+  // are within range (gameplay-neutral given VIEW_RANGE >= sniper range).
+  const deltas = new Map();
   for (const [id, p] of players) {
-    state[id] = {
+    deltas.set(id, {
       x: p.x, y: p.y, z: p.z,
       yaw: p.yaw, pitch: p.pitch,
       speed: p.speed, isGrounded: p.isGrounded,
       health: p.health, isDead: p.isDead,
       username: p.username,
-    };
+    });
   }
-  io.emit('world_state', state);
+  if (deltas.size === 0) return;
+
+  const viewSq = VIEW_RANGE * VIEW_RANGE;
+  for (const [recipientId, recipient] of players) {
+    const sock = io.sockets.sockets.get(recipientId);
+    if (!sock || !sock.connected) continue;
+    const out = {};
+    for (const [pid, snap] of deltas) {
+      if (pid === recipientId) continue;
+      const other = players.get(pid);
+      if (!other) continue;
+      const dx = other.x - recipient.x;
+      const dz = other.z - recipient.z;
+      if (dx * dx + dz * dz > viewSq) continue;
+      out[pid] = snap;
+    }
+    if (Object.keys(out).length > 0) sock.emit('world_state', out);
+  }
 }, TICK_MS);
 
 http.listen(PORT, () => {
