@@ -15,9 +15,9 @@ import {
   buildFPHands,
   animateAvatar,
   createUsernameLabel,
-  updateUsernameLabel,
   setWeaponType,
   updateWeaponSkin,
+  createRankBadge,
 } from './AvatarManager.js';
 import {
   MenuAvatarPreview,
@@ -321,11 +321,12 @@ function escapeHtml(str) {
 //  IN-GAME RANK BADGES  (top 3 leaderboard players get #1/#2/#3 above their head)
 // ══════════════════════════════════════════════════════════════════════════════
 
-function applyRankToLabel(label, displayName, lookupName) {
-  if (!label) return;
-  const key = String(lookupName != null ? lookupName : displayName).toLowerCase();
-  const rank = lbRanks.get(key) || 0;
-  updateUsernameLabel(label, displayName, -1, rank);
+// Apply the live rank medal to a username entry (remote player or local body).
+// `entry` exposes `medal` and either `username` or `lookupName`.
+function applyRankBadge(entry) {
+  if (!entry || !entry.medal) return;
+  const key = String(entry.lookupUsername != null ? entry.lookupUsername : entry.username).toLowerCase();
+  entry.medal.setRank(lbRanks.get(key) || 0);
 }
 
 async function refreshInGameRanks() {
@@ -336,14 +337,10 @@ async function refreshInGameRanks() {
     const next = new Map();
     for (const e of (data.entries || [])) next.set(e.username.toLowerCase(), e.rank);
     lbRanks = next;
-    // Refresh badges on every connected remote player.
-    for (const rp of remotePlayers.values()) {
-      if (rp && rp.label) applyRankToLabel(rp.label, rp.username, rp.username);
-    }
-    // And on the local player's own label (third-person view).
-    if (localBodyAvatar && localBodyAvatar.label) {
-      applyRankToLabel(localBodyAvatar.label, localUsername + ' (you)', localUsername);
-    }
+    // Refresh rank medals on every connected remote player.
+    for (const rp of remotePlayers.values()) applyRankBadge(rp);
+    // And on the local player's own body (third-person view).
+    applyRankBadge(localBodyAvatar);
   } catch (err) { /* ignore transient network errors */ }
 }
 
@@ -1673,6 +1670,11 @@ async function ensureLocalBody() {
   const label = createUsernameLabel(localUsername + ' (you)');
   label.position.set(0, 2.1, 0);
   root.add(label);
+
+  // Rank medal (1st/2nd/3rd global leaderboard image) floating beside the name.
+  const medal = createRankBadge();
+  medal.sprite.position.set(0.95, 2.05, 0);
+  root.add(medal.sprite);
   // Invisible hitbox
   const hitboxGeo = new THREE.BoxGeometry(1, 2, 1);
   const hitboxMat = new THREE.MeshBasicMaterial({ visible: false });
@@ -1692,8 +1694,8 @@ async function ensureLocalBody() {
   }
 
   scene.add(root);
-  localBodyAvatar = { root, joints, animator, hitbox, label };
-  console.log('Local body avatar created and added to scene');
+  localBodyAvatar = { root, joints, animator, hitbox, label, medal, username: localUsername, lookupUsername: localUsername };
+  applyRankBadge(localBodyAvatar);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1844,12 +1846,8 @@ function setupNetworkCallbacks() {
       const next = new Map();
       for (const e of standings.global) next.set(String(e.username).toLowerCase(), e.rank);
       lbRanks = next;
-      for (const rp of remotePlayers.values()) {
-        if (rp && rp.label) applyRankToLabel(rp.label, rp.username, rp.username);
-      }
-      if (localBodyAvatar && localBodyAvatar.label) {
-        applyRankToLabel(localBodyAvatar.label, localUsername + ' (you)', localUsername);
-      }
+      for (const rp of remotePlayers.values()) applyRankBadge(rp);
+      applyRankBadge(localBodyAvatar);
     }
     if (leaderboardModal && leaderboardModal.style.display !== 'none') {
       const payload = {
@@ -1884,11 +1882,16 @@ async function spawnRemotePlayer(id, data) {
     }
   });
 
-  // Username label above head (with leaderboard rank badge if top 3)
+  // Username label above head (rank medal is a separate sprite)
   const uname = data.username || data.name || id.slice(0, 6);
-  const label = createUsernameLabel(uname, -1, lbRanks.get(String(uname).toLowerCase()) || 0);
+  const label = createUsernameLabel(uname, -1, 0);
   label.position.set(0, 2.1, 0);
   root.add(label);
+
+  // Rank medal (1st/2nd/3rd global leaderboard image) floating beside the name.
+  const medal = createRankBadge();
+  medal.sprite.position.set(0.95, 2.05, 0);
+  root.add(medal.sprite);
 
   // Invisible hitbox
   const hitboxGeo = new THREE.BoxGeometry(1, 2, 1);
@@ -1899,7 +1902,9 @@ async function spawnRemotePlayer(id, data) {
 
   scene.add(root);
   const animState = { time: 0, speed: 0, isGrounded: true, pitch: 0, velocityY: 0 };
-  remotePlayers.set(id, { root, joints, animator, animState, label, hitbox, username: uname });
+  const rp = { root, joints, animator, animState, label, medal, hitbox, username: uname };
+  remotePlayers.set(id, rp);
+  applyRankBadge(rp);
 
   scores.set(id, { kills: data.kills || 0, deaths: data.deaths || 0, name: uname });
   updateScoreboard();

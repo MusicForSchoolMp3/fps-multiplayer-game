@@ -8,6 +8,113 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { SKINS_CONFIG } from './SkinManager.js';
 
+// ── Rank medal images (1st/2nd/3rd in the global leaderboard) ─────────────────
+// Imported via Vite so they are bundled, hashed and served with the app in both
+// dev and production. Each is a transparency-knockout image floating above head.
+import rankFirstImg  from './assets/rank-first.webp';
+import rankSecondImg from './assets/rank-second.jpg';
+import rankThirdImg  from './assets/rank-third.png';
+
+const RANK_IMG_URLS = {
+  1: rankFirstImg,
+  2: rankSecondImg,
+  3: rankThirdImg,
+};
+
+// Cache of decoded textures: rank -> { texture, width, height } (null until ready)
+const rankStates = { 1: null, 2: null, 3: null };
+// Array of callback functions to run once an image finishes loading so sprites
+// that asked for a badge before the asset arrived can paint themselves.
+const rankAwaiters = [];
+
+function decodeRankImage(rank, url) {
+  const img = new Image();
+  img.onload = () => {
+    const texture = new THREE.Texture(img);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.needsUpdate = true;
+    rankStates[rank] = {
+      texture,
+      width: Math.max(1, img.naturalWidth || 1),
+      height: Math.max(1, img.naturalHeight || 1),
+    };
+    for (const fn of rankAwaiters) fn();
+  };
+  img.onerror = () => {
+    // Fallback: a simple "#N" canvas badge so a broken asset never leaves a
+    // player with a missing medal.
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `bold ${size * 0.45}px Arial, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`#${rank}`, size / 2, size / 2 + size * 0.02);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    rankStates[rank] = { texture, width: size, height: size };
+    for (const fn of rankAwaiters) fn();
+  };
+  img.src = url;
+}
+
+// Kick off decoding for all three medals as soon as the module loads.
+for (const rank of [1, 2, 3]) decodeRankImage(rank, RANK_IMG_URLS[rank]);
+
+// ── Rank medal sprite ──────────────────────────────────────────────────────────
+// Returns an object with a THREE.Sprite that floats over a player's head and a
+// setRank() that swaps/hides it whenever the live leaderboard ranking changes.
+export function createRankBadge() {
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: null,
+    transparent: true,
+    depthTest: false,
+    sizeAttenuation: true,
+  }));
+  sprite.visible = false;
+
+  let currentRank = 0;
+
+  function paint() {
+    const state = rankStates[currentRank];
+    if (currentRank < 1 || currentRank > 3 || !state) {
+      sprite.visible = false;
+      return;
+    }
+    // Preserve the medal's aspect ratio, ~0.9 units tall.
+    const h = 0.9;
+    const w = h * (state.width / state.height);
+    sprite.material.map = state.texture;
+    sprite.material.needsUpdate = true;
+    sprite.scale.set(w, h, 1);
+    sprite.visible = true;
+  }
+
+  function setRank(rank) {
+    const next = Number(rank) || 0;
+    if (next === currentRank && sprite.visible) return;
+    currentRank = next;
+    paint();
+  }
+
+  // If the requested medal only just finished decoding (or failed), repaint.
+  rankAwaiters.push(() => {
+    if (currentRank >= 1 && currentRank <= 3) paint();
+  });
+
+  // Also repaint once the dual texture arrives for the sprite's very first paint.
+  paint();
+
+  return { sprite, setRank };
+}
+
 // ── Sniper GLB Model Preloader ────────────────────────────────────────────────
 const sniperGlbTemplates = {}; // Store multiple sniper models by skin ID
 const sniperCallbacks = {}; // Callbacks for each skin
