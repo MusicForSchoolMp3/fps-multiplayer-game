@@ -5,6 +5,15 @@ import compression from 'compression';
 import { Server } from 'socket.io';
 import msgpackParser from 'socket.io-msgpack-parser';
 
+// ── RENDER MIGRATION MODE (old Render deployment only, never set on the VM) ──
+// RENDER_MIGRATION_MODE=true hands off to the ultra-light migration server; the
+// mock game server below never starts. The production VM never sets this
+// variable, so on the VM this block is inert. This entry point is only used by
+// Render's start command (render.yaml), and never by the VM systemd service.
+if (process.env.RENDER_MIGRATION_MODE === 'true') {
+  await import('./migration-server.js');
+}
+
 const PORT = process.env.PORT || 3001;
 const TICK_MS = 1000 / 30;
 const MAX_HP = 100;

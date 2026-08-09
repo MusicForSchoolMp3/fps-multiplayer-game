@@ -5,3 +5,9 @@ services:
     plan: free
     buildCommand: npm install && npm run build
     startCommand: node server/test-server.js
+    envVars:
+      # Old Render deployment: only shows the "THE GAME HAS MOVED!" notice
+      # pointing players to the new server (http://202.128.119.42:3001/).
+      # The production VM does NOT have this variable - it runs the full game.
+      - key: RENDER_MIGRATION_MODE
+        value: "true"

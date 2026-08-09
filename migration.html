@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" />
+  <title>Game Server Moved</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body { height: 100%; }
+
+    body {
+      background: radial-gradient(ellipse at 40% 50%, #0e1520 0%, #020408 100%);
+      color: #fff;
+      font-family: 'Segoe UI', 'Arial', sans-serif;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .migration-card {
+      width: 100%;
+      max-width: 460px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 14px;
+      padding: 48px 44px 40px;
+      text-align: center;
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+    }
+
+    .migration-title {
+      font-size: 30px;
+      font-weight: 900;
+      letter-spacing: 8px;
+      line-height: 1.3;
+      background: linear-gradient(135deg, #ff4444 0%, #ff8844 60%, #ffcc44 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 28px;
+    }
+
+    .migration-text {
+      font-size: 14px;
+      line-height: 1.7;
+      letter-spacing: 0.5px;
+      color: rgba(255, 255, 255, 0.75);
+      margin-bottom: 10px;
+    }
+
+    .migration-text strong {
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .migration-play-btn {
+      display: inline-block;
+      margin: 28px 0 30px;
+      padding: 15px 34px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #ff4444 0%, #ff7722 100%);
+      color: #fff;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-decoration: none;
+      text-transform: uppercase;
+      box-shadow: 0 6px 20px rgba(255, 68, 68, 0.3);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .migration-play-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 25px rgba(255, 68, 68, 0.45);
+    }
+
+    .migration-play-btn:active {
+      transform: translateY(0);
+    }
+
+    .migration-new-server-label {
+      font-size: 10px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.35);
+      margin-bottom: 8px;
+    }
+
+    .migration-new-server-url {
+      display: inline-block;
+      font-family: 'Consolas', 'Menlo', 'Courier New', monospace;
+      font-size: 13px;
+      letter-spacing: 0.5px;
+      color: #ff8844;
+      padding: 8px 14px;
+      border: 1px solid rgba(255, 136, 68, 0.25);
+      border-radius: 8px;
+      background: rgba(255, 136, 68, 0.06);
+      text-decoration: none;
+      word-break: break-all;
+      transition: background 0.2s ease;
+    }
+
+    .migration-new-server-url:hover {
+      background: rgba(255, 136, 68, 0.12);
+    }
+
+    .migration-footer {
+      margin-top: 30px;
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.2);
+    }
+  </style>
+</head>
+<body>
+  <div class="migration-card">
+    <h1 class="migration-title">THE GAME HAS MOVED!</h1>
+
+    <p class="migration-text">The FPS game has moved to a new server.</p>
+    <p class="migration-text">Render is no longer being used to host the game.</p>
+    <p class="migration-text">Click the button below to continue playing.</p>
+
+    <a class="migration-play-btn" href="http://202.128.119.42:3001/">PLAY ON THE NEW SERVER</a>
+
+    <div class="migration-new-server-label">New server</div>
+    <a class="migration-new-server-url" href="http://202.128.119.42:3001/">http://202.128.119.42:3001/</a>
+
+    <div class="migration-footer">Old Render deployment retired</div>
+  </div>
+</body>
+</html>

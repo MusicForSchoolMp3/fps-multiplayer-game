@@ -12,6 +12,22 @@ import { dirname, join, extname } from 'path';
 import { readdirSync, existsSync } from 'fs';
 import 'dotenv/config';
 
+// ════════════════════════════════════════════════════════════════════════════
+//  RENDER MIGRATION MODE (old Render deployment only — NEVER set on the VM)
+// ════════════════════════════════════════════════════════════════════════════
+// When RENDER_MIGRATION_MODE=true, this server hands off to the ultra-light
+// migration server and the full game server below (Socket.IO, MongoDB,
+// authentication, API, gameplay, static assets) never starts. The production
+// Debian VM does not set this variable, so on the VM this block is inert and
+// everything below runs exactly as before.
+//
+// migration-server.js waits forever inside its own module evaluation, so this
+// `await import()` never resolves and nothing after it can execute while the
+// migration listener keeps the process alive.
+if (process.env.RENDER_MIGRATION_MODE === 'true') {
+  await import('./migration-server.js');
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
