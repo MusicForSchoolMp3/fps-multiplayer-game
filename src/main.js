@@ -51,16 +51,16 @@ const EYE_HEIGHT  = 1.65;
 // ── Update Log ─────────────────────────────────────────────────────────────────
 const UPDATE_LOG = [
   {
-    date: '2026-08-05',
+    date: '2026-08-09',
     items: [
-      'COMING SOON: Brand new map, ranks, more weapons, and both character and weapon skins',
-      'Added monthly/global leaderboard (total kills)',
-      'Added unlockable emotes',
-      'Added emote wheel',
+      'Added the new arena map (ramps, stairs, platforms and doors)',
+      'Added monthly/global leaderboard (total kills) and rank badges',
+      'Added character and weapon skins',
+      'Added unlockable emotes and the emote wheel',
       'Added anticheat',
       'Fixed weapon switching ammo persistence to prevent abuse',
       {
-        text: 'Note to Users: The current false banning issue has been resolved.',
+        text: 'Fixed the false-bans: ramp climbing no longer triggers flight detection (height threshold raised dramatically).',
         bold: true
       }
     ]
