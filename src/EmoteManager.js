@@ -95,8 +95,8 @@ export class EmoteManager {
     const ctx = this.getContext && this.getContext();
     const c = ctx && ctx.controller;
     if (!c) return true;
-    const hSpeed = Math.sqrt(c.velocity.x ** 2 + c.velocity.z ** 2);
-    return c.isGrounded && hSpeed <= MOVE_CANCEL_SPEED;
+    const hSpeed = Math.sqrt(c.momentum.x ** 2 + c.momentum.z ** 2);
+    return c.anchored && hSpeed <= MOVE_CANCEL_SPEED;
   }
 
   // ── Local playback ───────────────────────────────────────────────────────

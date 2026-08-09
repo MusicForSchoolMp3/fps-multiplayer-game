@@ -55,9 +55,9 @@ function createPlayer(socket) {
     username: `Player${socket.id.slice(0, 4)}`,
     name: `Player${socket.id.slice(0, 4)}`,
     colorIndex: (colorCounter++) % COLORS.length,
-    x: spawn.x, y: spawn.y, z: spawn.z,
-    yaw: 0, pitch: 0, speed: 0,
-    isGrounded: true,
+    px: spawn.x, py: spawn.y, pz: spawn.z,
+    ry: 0, rp: 0, gait: 0,
+    docked: true,
     health: MAX_HP,
     kills: 0,
     deaths: 0,
@@ -68,10 +68,10 @@ function createPlayer(socket) {
 
 function sanitize(p) {
   return {
-    x: p.x, y: p.y, z: p.z,
-    yaw: p.yaw, pitch: p.pitch,
-    speed: p.speed,
-    isGrounded: p.isGrounded,
+    px: p.px, py: p.py, pz: p.pz,
+    ry: p.ry, rp: p.rp,
+    gait: p.gait,
+    docked: p.docked,
     health: p.health,
     kills: p.kills, deaths: p.deaths,
     name: p.name,
@@ -133,13 +133,13 @@ io.on('connection', (socket) => {
   socket.on('move', (snap) => {
     const p = players.get(socket.id);
     if (!p || p.isDead) return;
-    p.x = clamp(snap.x, -99, 99);
-    p.y = Math.max(0, snap.y);
-    p.z = clamp(snap.z, -99, 99);
-    p.yaw = snap.yaw || 0;
-    p.pitch = clamp(snap.pitch || 0, -Math.PI / 2, Math.PI / 2);
-    p.speed = Math.abs(snap.speed || 0);
-    p.isGrounded = !!snap.isGrounded;
+    p.px = clamp(snap.px, -99, 99);
+    p.py = Math.max(0, snap.py);
+    p.pz = clamp(snap.pz, -99, 99);
+    p.ry = snap.ry || 0;
+    p.rp = clamp(snap.rp || 0, -Math.PI / 2, Math.PI / 2);
+    p.gait = Math.abs(snap.gait || 0);
+    p.docked = !!snap.docked;
     p.lastSeen = Date.now();
   });
 
@@ -202,7 +202,7 @@ function killPlayer(victimId, killerId) {
     const p = players.get(victimId);
     if (!p) return;
     const s = nextSpawn();
-    p.x = s.x; p.y = s.y; p.z = s.z;
+    p.px = s.x; p.py = s.y; p.pz = s.z;
     p.health = MAX_HP;
     p.isDead = false;
     io.emit('player_respawn', { id: victimId, ...s });
@@ -216,9 +216,9 @@ setInterval(() => {
   const deltas = new Map();
   for (const [id, p] of players) {
     deltas.set(id, {
-      x: p.x, y: p.y, z: p.z,
-      yaw: p.yaw, pitch: p.pitch,
-      speed: p.speed, isGrounded: p.isGrounded,
+      px: p.px, py: p.py, pz: p.pz,
+      ry: p.ry, rp: p.rp,
+      gait: p.gait, docked: p.docked,
       health: p.health, isDead: p.isDead,
       username: p.username,
     });
@@ -234,8 +234,8 @@ setInterval(() => {
       if (pid === recipientId) continue;
       const other = players.get(pid);
       if (!other) continue;
-      const dx = other.x - recipient.x;
-      const dz = other.z - recipient.z;
+      const dx = other.px - recipient.px;
+      const dz = other.pz - recipient.pz;
       if (dx * dx + dz * dz > viewSq) continue;
       out[pid] = snap;
     }

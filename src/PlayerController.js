@@ -27,11 +27,11 @@ export class PlayerController {
     this.domElement = domElement;
 
     // State
-    this.position  = new THREE.Vector3(0, EYE_HEIGHT, 0);
-    this.velocity  = new THREE.Vector3();
-    this.yaw       = 0;   // horizontal look (radians)
-    this.pitch     = 0;   // vertical look   (radians)
-    this.isGrounded = true;
+    this.location  = new THREE.Vector3(0, EYE_HEIGHT, 0);
+    this.momentum  = new THREE.Vector3();
+    this.swivel    = 0;   // horizontal look (radians)
+    this.lean      = 0;   // vertical look   (radians)
+    this.anchored  = true;
     this.isAlive   = true;
 
     // Keys
@@ -49,8 +49,8 @@ export class PlayerController {
     // Head bob toggle setting
     this.enableHeadBob = true;
 
-    // Map colliders: actual THREE.Mesh objects, raycast against real geometry
-    this.colliders = [];
+    // Collision shapes: actual THREE.Mesh objects, raycast against real geometry
+    this.hurdles = [];
 
     // Fallback floor height (used when no surface is found below)
     this.groundY = GROUND_Y;
@@ -64,9 +64,9 @@ export class PlayerController {
     this._setupListeners();
   }
 
-  setColliders(meshes) {
-    this.colliders = meshes || [];
-    for (const m of this.colliders) m.updateMatrixWorld(true);
+  setHurdles(meshes) {
+    this.hurdles = meshes || [];
+    for (const m of this.hurdles) m.updateMatrixWorld(true);
   }
 
   setGroundY(y) {
@@ -88,9 +88,9 @@ export class PlayerController {
 
     document.addEventListener('mousemove', (e) => {
       if (!this._locked || !this.isAlive) return;
-      this.yaw   -= e.movementX * this.sensitivity * this.zoomSensitivityMultiplier;
-      this.pitch -= e.movementY * this.sensitivity * this.zoomSensitivityMultiplier;
-      this.pitch  = Math.max(-Math.PI * 0.48, Math.min(Math.PI * 0.48, this.pitch));
+      this.swivel   -= e.movementX * this.sensitivity * this.zoomSensitivityMultiplier;
+      this.lean -= e.movementY * this.sensitivity * this.zoomSensitivityMultiplier;
+      this.lean  = Math.max(-Math.PI * 0.48, Math.min(Math.PI * 0.48, this.lean));
     });
 
     document.addEventListener('keydown', (e) => {
@@ -134,47 +134,47 @@ export class PlayerController {
     if (dir.length() > 0) dir.normalize();
 
     // Rotate direction by yaw
-    dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+    dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.swivel);
 
-    // Apply horizontal velocity
-    this.velocity.x = dir.x * speed;
-    this.velocity.z = dir.z * speed;
+    // Apply horizontal velocity ➜ momentum
+    this.momentum.x = dir.x * speed;
+    this.momentum.z = dir.z * speed;
 
     // Gravity & jump
-    if (this.isGrounded) {
+    if (this.anchored) {
       if (this._keys.space) {
-        this.velocity.y = JUMP_FORCE;
-        this.isGrounded  = false;
+        this.momentum.y = JUMP_FORCE;
+        this.anchored  = false;
       } else {
-        this.velocity.y = 0;
+        this.momentum.y = 0;
       }
     } else {
-      this.velocity.y += GRAVITY * delta;
+      this.momentum.y += GRAVITY * delta;
     }
 
     // Keep world matrices fresh so raycasts follow moved/rotated colliders
-    for (const m of this.colliders) m.updateMatrixWorld(true);
+    for (const m of this.hurdles) m.updateMatrixWorld(true);
 
     // ── Movement & Map Collisions ───────────────────────────────────────────
-    this._sweepHorizontal(1, this.velocity.x * delta); // X axis
-    this._sweepHorizontal(2, this.velocity.z * delta); // Z axis
-    this._applyVertical(this.velocity.y * delta);
+    this._sweepHorizontal(1, this.momentum.x * delta); // X axis
+    this._sweepHorizontal(2, this.momentum.z * delta); // Z axis
+    this._applyVertical(this.momentum.y * delta);
 
     // Fallback floor (keeps the player off infinite falls if the floor has no collider)
-    if (this.position.y - EYE_HEIGHT < this.groundY) {
-      this.position.y = this.groundY + EYE_HEIGHT;
-      this.velocity.y = 0;
-      this.isGrounded = true;
+    if (this.location.y - EYE_HEIGHT < this.groundY) {
+      this.location.y = this.groundY + EYE_HEIGHT;
+      this.momentum.y = 0;
+      this.anchored = true;
     }
 
     // Clamp to play area boundary (200x200 map, walls at +-100)
     const BOUND = 99.0;
-    this.position.x = Math.max(-BOUND, Math.min(BOUND, this.position.x));
-    this.position.z = Math.max(-BOUND, Math.min(BOUND, this.position.z));
+    this.location.x = Math.max(-BOUND, Math.min(BOUND, this.location.x));
+    this.location.z = Math.max(-BOUND, Math.min(BOUND, this.location.z));
 
     // Head-bob calculation
-    const hSpeed = Math.sqrt(this.velocity.x ** 2 + this.velocity.z ** 2);
-    if (this.enableHeadBob && this.isGrounded && hSpeed > 0.5) {
+    const hSpeed = Math.sqrt(this.momentum.x ** 2 + this.momentum.z ** 2);
+    if (this.enableHeadBob && this.anchored && hSpeed > 0.5) {
       this._bobTime += delta * (this._keys.shift ? 11 : 8);
       this._bobAmp   = THREE.MathUtils.lerp(this._bobAmp, 0.045, 0.12);
     } else {
@@ -190,13 +190,13 @@ export class PlayerController {
     const bobY     = this.enableHeadBob ? Math.sin(this._bobTime * 2) * this._bobAmp : 0;
 
     const euler = new THREE.Euler(
-      this.pitch + this.recoilPitch + bobPitch,
-      this.yaw,
+      this.lean + this.recoilPitch + bobPitch,
+      this.swivel,
       bobRoll,
       'YXZ'
     );
     this.camera.quaternion.setFromEuler(euler);
-    this.camera.position.copy(this.position).add(new THREE.Vector3(0, bobY, 0));
+    this.camera.position.copy(this.location).add(new THREE.Vector3(0, bobY, 0));
   }
 
   // ── Raycast helpers ─────────────────────────────────────────────────────────
@@ -205,7 +205,7 @@ export class PlayerController {
   _raycast(origin, dirVec, maxDist) {
     this._raycaster.set(origin, dirVec);
     this._raycaster.far = maxDist;
-    const hits = this._raycaster.intersectObjects(this.colliders, true);
+    const hits = this._raycaster.intersectObjects(this.hurdles, true);
     if (hits.length === 0) return null;
 
     const hit = hits[0];
@@ -231,9 +231,9 @@ export class PlayerController {
     for (const off of offs) {
       for (const h of [0.12, 1.0, EYE_HEIGHT - 0.12]) {
         const origin = new THREE.Vector3(
-          this.position.x + (axis === 1 ? lead : off),
-          this.position.y - EYE_HEIGHT + h,
-          this.position.z + (axis === 2 ? lead : off)
+          this.location.x + (axis === 1 ? lead : off),
+          this.location.y - EYE_HEIGHT + h,
+          this.location.z + (axis === 2 ? lead : off)
         );
         const rayDir = axis === 1
           ? new THREE.Vector3(sign, 0, 0)
@@ -245,8 +245,8 @@ export class PlayerController {
       }
     }
 
-    if (axis === 1) this.position.x += sign * travel;
-    else             this.position.z += sign * travel;
+    if (axis === 1) this.location.x += sign * travel;
+    else             this.location.z += sign * travel;
 
     // Auto-step small ledges instead of getting stuck on their vertical faces
     if (travel < size - 1e-4) {
@@ -257,10 +257,10 @@ export class PlayerController {
   // Try to step onto a ledge (or the start of a ramp) up to STEP_HEIGHT tall.
   // Only commits if there is headroom and the path is clear at the raised height.
   _tryStepUp(axis, sign, remaining) {
-    const raisedFeet = this.position.y - EYE_HEIGHT + STEP_HEIGHT;
+    const raisedFeet = this.location.y - EYE_HEIGHT + STEP_HEIGHT;
 
     const headCheck = this._raycast(
-      new THREE.Vector3(this.position.x, raisedFeet + EYE_HEIGHT, this.position.z),
+      new THREE.Vector3(this.location.x, raisedFeet + EYE_HEIGHT, this.location.z),
       new THREE.Vector3(0, 1, 0),
       STEP_HEIGHT + MARGIN
     );
@@ -269,9 +269,9 @@ export class PlayerController {
     const lead = sign * (PLAYER_RADIUS + 0.05);
     for (const off of [0, PLAYER_RADIUS * 0.85, -PLAYER_RADIUS * 0.85]) {
       const origin = new THREE.Vector3(
-        this.position.x + (axis === 1 ? lead : off),
+        this.location.x + (axis === 1 ? lead : off),
         raisedFeet + 0.35,
-        this.position.z + (axis === 2 ? lead : off)
+        this.location.z + (axis === 2 ? lead : off)
       );
       const rayDir = axis === 1
         ? new THREE.Vector3(sign, 0, 0)
@@ -281,39 +281,39 @@ export class PlayerController {
     }
 
     // Commit the step: raise, then finish the move
-    this.position.y = raisedFeet + EYE_HEIGHT;
-    if (axis === 1) this.position.x += sign * remaining;
-    else            this.position.z += sign * remaining;
+    this.location.y = raisedFeet + EYE_HEIGHT;
+    if (axis === 1) this.location.x += sign * remaining;
+    else            this.location.z += sign * remaining;
   }
 
   // Vertical movement: rises with ceiling blocking, falls with ground/ramp
   // snapping. Ramps climb for free: after moving horizontally into the slope,
   // the down-ray lands the feet on whatever surface is up to SNAP_DISTANCE above.
   _applyVertical(moveY) {
-    const feet = this.position.y - EYE_HEIGHT;
+    const feet = this.location.y - EYE_HEIGHT;
 
     // Rising: clamp against ceilings
     if (moveY > 0) {
       const hit = this._raycast(
-        new THREE.Vector3(this.position.x, this.position.y, this.position.z),
+        new THREE.Vector3(this.location.x, this.location.y, this.location.z),
         new THREE.Vector3(0, 1, 0),
         moveY + MARGIN
       );
       if (hit) {
-        this.position.y = hit.point.y - MARGIN;
-        this.velocity.y = 0;
+        this.location.y = hit.point.y - MARGIN;
+        this.momentum.y = 0;
       } else {
-        this.position.y += moveY;
+        this.location.y += moveY;
       }
       return;
     }
 
     // Fall (or stand): move down, then probe for a surface below
-    if (moveY < 0) this.position.y += moveY;
+    if (moveY < 0) this.location.y += moveY;
 
     const probeY = feet + SNAP_DISTANCE + MARGIN;
     const hit = this._raycast(
-      new THREE.Vector3(this.position.x, probeY, this.position.z),
+      new THREE.Vector3(this.location.x, probeY, this.location.z),
       new THREE.Vector3(0, -1, 0),
       (moveY < 0 ? -moveY : 0) + SNAP_DISTANCE + MARGIN
     );
@@ -322,17 +322,17 @@ export class PlayerController {
       const surfaceY = hit.point.y;
       if (surfaceY > feet - 1e-4) {
         // ramp / platform climb or landing
-        this.position.y = surfaceY + EYE_HEIGHT;
-        this.velocity.y = 0;
-        this.isGrounded = true;
-      } else if (!this.isGrounded) {
+        this.location.y = surfaceY + EYE_HEIGHT;
+        this.momentum.y = 0;
+        this.anchored = true;
+      } else if (!this.anchored) {
         // fell onto a surface slightly below (smooth landing)
-        this.position.y = surfaceY + EYE_HEIGHT;
-        this.velocity.y = 0;
-        this.isGrounded = true;
+        this.location.y = surfaceY + EYE_HEIGHT;
+        this.momentum.y = 0;
+        this.anchored = true;
       }
     } else {
-      this.isGrounded = false;
+      this.anchored = false;
     }
   }
 
@@ -347,27 +347,27 @@ export class PlayerController {
     const quantize = (val, precision) => Math.round(val * precision) / precision;
     
     return {
-      x: quantize(this.position.x, 100), // 2 decimal places (1cm precision)
-      y: quantize(this.position.y, 100),
-      z: quantize(this.position.z, 100),
-      yaw: quantize(this.yaw, 1000), // 3 decimal places for rotation
-      pitch: quantize(this.pitch, 1000),
-      speed: Math.round(Math.sqrt(this.velocity.x ** 2 + this.velocity.z ** 2) * 10) / 10, // 1 decimal place
-      isGrounded: this.isGrounded,
-      velocityY: quantize(this.velocity.y, 100), // Include vertical velocity for jump animation sync
+      px: quantize(this.location.x, 100), // 2 decimal places (1cm precision)
+      py: quantize(this.location.y, 100),
+      pz: quantize(this.location.z, 100),
+      ry: quantize(this.swivel, 1000), // 3 decimal places for rotation
+      rp: quantize(this.lean, 1000),
+      gait: Math.round(Math.sqrt(this.momentum.x ** 2 + this.momentum.z ** 2) * 10) / 10, // 1 decimal place
+      docked: this.anchored,
+      ascend: quantize(this.momentum.y, 100), // Include vertical velocity for jump animation sync
     };
   }
 
   // ── Respawn at position ─────────────────────────────────────────────────────
   respawn(pos) {
-    this.position.set(pos.x, pos.y + EYE_HEIGHT, pos.z);
-    this.velocity.set(0, 0, 0);
-    this.isGrounded = true;
+    this.location.set(pos.x, pos.y + EYE_HEIGHT, pos.z);
+    this.momentum.set(0, 0, 0);
+    this.anchored = true;
     this.isAlive    = true;
   }
 
   die() {
     this.isAlive = false;
-    this.velocity.set(0, 0, 0);
+    this.momentum.set(0, 0, 0);
   }
 }

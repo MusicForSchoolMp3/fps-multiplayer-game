@@ -812,7 +812,7 @@ async function startGame() {
   // Raycast against the real geometry (rotated ramps, doorways, stairs) instead
   // of fat Box3 AABBs. Ground sheets are included: their up-facing faces can't
   // block horizontal movement, but they catch the player on fall.
-  controller.setColliders([...mapMeshes, ...groundSheets]);
+  controller.setHurdles([...mapMeshes, ...groundSheets]);
   controller.setGroundY(mapGroundY);
 
   // ── Network ───────────────────────────────────────────────────────────────
@@ -1547,11 +1547,11 @@ async function ensureLocalBody() {
   // Position at player's current position if controller exists
   if (controller) {
     root.position.set(
-      controller.position.x,
-      controller.position.y - EYE_HEIGHT,
-      controller.position.z
+      controller.location.x,
+      controller.location.y - EYE_HEIGHT,
+      controller.location.z
     );
-    root.rotation.y = controller.yaw + Math.PI;
+    root.rotation.y = controller.swivel + Math.PI;
     console.log('Local body positioned at:', root.position);
   }
 
@@ -1730,7 +1730,7 @@ async function spawnRemotePlayer(id, data) {
   const colorIdx = data.colorIndex || 0;
   const { root, joints, animator } = await buildHumanoid(colorIdx, false);
   // Subtract EYE_HEIGHT to convert from eye position to ground position
-  root.position.set(data.x || 0, (data.y || 0) - EYE_HEIGHT, data.z || 0);
+  root.position.set(data.px || 0, (data.py || 0) - EYE_HEIGHT, data.pz || 0);
   
   // Set initial weapon type
   if (data.currentWeapon) {
@@ -1858,7 +1858,7 @@ function gameLoop() {
 
   // ── Ammo pickup collision ────────────────────────────────────────────────
   if (!isDead && window.ammoPickups) {
-    const playerPos = controller.position;
+    const playerPos = controller.location;
     const time = now / 1000;
 
     for (let i = window.ammoPickups.length - 1; i >= 0; i--) {
@@ -1908,7 +1908,7 @@ function gameLoop() {
     controller.update(delta);
     // Debug: log controller state occasionally
     if (Math.random() < 0.01) {
-      console.log('Controller update - isLocked:', controller.isLocked, 'velocity:', controller.velocity, 'position:', controller.position);
+      console.log('Controller update - isLocked:', controller.isLocked, 'velocity:', controller.momentum, 'position:', controller.location);
     }
   }
 
@@ -1932,26 +1932,26 @@ function gameLoop() {
   // ── Update local body avatar (always, not just in third-person) ────────────
   if (localBodyAvatar && !isDead) {
     const feetPos = new THREE.Vector3(
-      controller.position.x,
-      controller.position.y - EYE_HEIGHT,
-      controller.position.z
+      controller.location.x,
+      controller.location.y - EYE_HEIGHT,
+      controller.location.z
     );
     localBodyAvatar.root.position.copy(feetPos);
-    localBodyAvatar.root.rotation.y = controller.yaw + Math.PI;
+    localBodyAvatar.root.rotation.y = controller.swivel + Math.PI;
     localBodyAvatar.root.updateMatrixWorld(); // Force matrix update
-    localAnimState.speed      = Math.sqrt(controller.velocity.x ** 2 + controller.velocity.z ** 2);
-    localAnimState.isGrounded = controller.isGrounded;
-    localAnimState.pitch      = controller.pitch;
-    localAnimState.velocityY  = controller.velocity.y || 0;
+    localAnimState.speed      = Math.sqrt(controller.momentum.x ** 2 + controller.momentum.z ** 2);
+    localAnimState.isGrounded = controller.anchored;
+    localAnimState.pitch      = controller.lean;
+    localAnimState.velocityY  = controller.momentum.y || 0;
     animateAvatar(localBodyAvatar, localAnimState, delta);
   }
 
   // ── Third-person camera override ──────────────────────────────────────────
   if (isThirdPerson && !isDead) {
     const feetPos = new THREE.Vector3(
-      controller.position.x,
-      controller.position.y - EYE_HEIGHT,
-      controller.position.z
+      controller.location.x,
+      controller.location.y - EYE_HEIGHT,
+      controller.location.z
     );
 
     // Target point to look at (chest / upper body)
@@ -1960,12 +1960,12 @@ function gameLoop() {
 
     // Orbit distance and pitch clamping - negate pitch to fix inversion
     const dist  = 3.8;
-    const pitch = Math.max(-Math.PI * 0.44, Math.min(Math.PI * 0.44, -controller.pitch));
+    const pitch = Math.max(-Math.PI * 0.44, Math.min(Math.PI * 0.44, -controller.lean));
 
     // Calculate orbit position using pitch and yaw
-    const camX = target.x + dist * Math.cos(pitch) * Math.sin(controller.yaw);
+    const camX = target.x + dist * Math.cos(pitch) * Math.sin(controller.swivel);
     const camY = target.y + dist * Math.sin(pitch) + 0.3;
-    const camZ = target.z + dist * Math.cos(pitch) * Math.cos(controller.yaw);
+    const camZ = target.z + dist * Math.cos(pitch) * Math.cos(controller.swivel);
 
     camera.position.set(camX, camY, camZ);
     camera.lookAt(target);
@@ -1983,9 +1983,9 @@ function gameLoop() {
   // ── Update FP hands animation ───────────────────────────────────────────────
   if (fpHandsAnimator && !isThirdPerson && !isDead) {
     const fpAnimState = {
-      speed: Math.sqrt(controller.velocity.x ** 2 + controller.velocity.z ** 2),
-      isGrounded: controller.isGrounded,
-      velocityY: controller.velocity.y || 0
+      speed: Math.sqrt(controller.momentum.x ** 2 + controller.momentum.z ** 2),
+      isGrounded: controller.anchored,
+      velocityY: controller.momentum.y || 0
     };
     animateAvatar({ animator: fpHandsAnimator }, fpAnimState, delta);
   }
@@ -1995,12 +1995,12 @@ function gameLoop() {
     const snap = net.getInterpolated(id);
     if (!snap) continue;
     // Subtract EYE_HEIGHT to convert from eye position to ground position
-    rp.root.position.set(snap.x, snap.y - EYE_HEIGHT, snap.z); // Use actual Y position for jump height visibility
-    rp.root.rotation.y      = snap.yaw + Math.PI;
-    rp.animState.speed      = snap.speed || 0;
-    rp.animState.isGrounded = snap.isGrounded;
-    rp.animState.pitch      = snap.pitch || 0;
-    rp.animState.velocityY  = snap.velocityY || 0; // Use actual velocityY for jump animation sync
+    rp.root.position.set(snap.px, snap.py - EYE_HEIGHT, snap.pz); // Use actual py for jump height visibility
+    rp.root.rotation.y      = snap.ry + Math.PI;
+    rp.animState.speed      = snap.gait || 0;
+    rp.animState.isGrounded = snap.docked;
+    rp.animState.pitch      = snap.rp || 0;
+    rp.animState.velocityY  = snap.ascend || 0; // Use actual ascend for jump animation sync
     animateAvatar(rp, rp.animState, delta);
   }
 

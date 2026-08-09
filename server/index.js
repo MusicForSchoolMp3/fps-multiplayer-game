@@ -126,10 +126,10 @@ function defaultWheel() {
 
 console.log(`[Emotes] Detected ${EMOTES.length} emote(s): ${EMOTES.map(e => `${e.name}(${e.price})`).join(', ') || '(none)'}`);
 
-// Anticheat constants
-const MAX_SPEED = 15.0; // Maximum allowed speed (units/sec)
-const ANTICHEAT_WARNINGS_THRESHOLD = 3; // Number of warnings before kick
-const ANTICHEAT_BAN_DURATION = 300000; // 5 minutes in milliseconds
+// Anticheat tuning
+const PACE_LIMIT = 15.0; // Maximum allowed pace (units/sec)
+const INFRACTION_CAP = 3; // Number of warnings before kick
+const SENTENCE_MILLIS = 300000; // 5 minutes in milliseconds
 
 // ── Leaderboard helpers ────────────────────────────────────────────────────────
 // Testing blacklist: these accounts are locked out of the game.
@@ -393,10 +393,10 @@ function createPlayer(socket, username) {
     username: username,
     name: username,
     colorIndex: (colorCounter++) % COLORS.length,
-    x: spawn.x, y: spawn.y, z: spawn.z,
-    yaw: 0, pitch: 0, speed: 0,
-    isGrounded: true,
-    velocityY: 0,
+    px: spawn.x, py: spawn.y, pz: spawn.z,
+    ry: 0, rp: 0, gait: 0,
+    docked: true,
+    ascend: 0,
     health: MAX_HP,
     kills: 0,
     deaths: 0,
@@ -406,12 +406,12 @@ function createPlayer(socket, username) {
     // Emotes: per-account unlocked set + currently playing emote (server mirrors)
     unlockedEmotes: new Set(),
     currentEmote: null,
-    // Anticheat tracking
-    anticheatWarnings: 0,
-    lastAnticheatWarning: 0,
+    // Verdict tracking
+    infractionTally: 0,
+    infractionMoment: 0,
     isBanned: false,
     banExpiry: 0,
-    // Weapon anticheat tracking
+    // Weapon verdict tracking
     lastShotTime: now,
     lastReloadTime: now,
     lastReloadWeapon: 'ar', // which weapon the last reload_start belonged to
@@ -419,10 +419,10 @@ function createPlayer(socket, username) {
     reloadStartTime: 0,
     // Previous state for delta compression
     _prev: {
-      x: spawn.x, y: spawn.y, z: spawn.z,
-      yaw: 0, pitch: 0, speed: 0,
-      isGrounded: true,
-      velocityY: 0,
+      px: spawn.x, py: spawn.y, pz: spawn.z,
+      ry: 0, rp: 0, gait: 0,
+      docked: true,
+      ascend: 0,
       health: MAX_HP,
       isDead: false,
       currentWeapon: 'ar',
@@ -433,11 +433,11 @@ function createPlayer(socket, username) {
 
 function sanitize(p) {
   return {
-    x: p.x, y: p.y, z: p.z,
-    yaw: p.yaw, pitch: p.pitch,
-    speed: p.speed,
-    isGrounded: p.isGrounded,
-    velocityY: p.velocityY || 0, // Include vertical velocity for jump animation sync
+    px: p.px, py: p.py, pz: p.pz,
+    ry: p.ry, rp: p.rp,
+    gait: p.gait,
+    docked: p.docked,
+    ascend: p.ascend || 0, // Include vertical velocity for jump animation sync
     health: p.health,
     kills: p.kills, deaths: p.deaths,
     name: p.name,
@@ -457,26 +457,26 @@ function broadcastToNearby(event, payload, from) {
     if (!from || id === from.id) continue;
     const sock = io.sockets.sockets.get(id);
     if (!sock || !sock.connected) continue;
-    const dx = p.x - from.x;
-    const dz = p.z - from.z;
+    const dx = p.px - from.px;
+    const dz = p.pz - from.pz;
     if (dx * dx + dz * dz > viewSq) continue;
     sock.emit(event, payload);
   }
 }
 
-// Anticheat: Kick player and add warning to account
-async function kickPlayerForCheating(socket, player, reason) {
-  console.log(`[Anticheat] Kicking ${player.username} for: ${reason}`);
+// Anticheat: disqualify a player and record the verdict on the account
+async function disqualifyNow(socket, player, reason) {
+  console.log(`[Anticheat] Disqualifying ${player.username} for: ${reason}`);
   
   // Set ban status
-  const banExpiry = Date.now() + ANTICHEAT_BAN_DURATION;
+  const banExpiry = Date.now() + SENTENCE_MILLIS;
   player.isBanned = true;
   player.banExpiry = banExpiry;
   
   // Notify player
   socket.emit('anticheat_kick', {
     reason: reason,
-    duration: ANTICHEAT_BAN_DURATION / 1000, // seconds
+    duration: SENTENCE_MILLIS / 1000, // seconds
     expiry: new Date(banExpiry).toISOString()
   });
   
@@ -526,40 +526,40 @@ function createDeltaUpdate(prevState, currentState) {
   let hasChanges = false;
 
   // Check position changes
-  if (prevState.x !== currentState.x) {
-    delta.x = quantizePosition(currentState.x);
+  if (prevState.px !== currentState.px) {
+    delta.px = quantizePosition(currentState.px);
     hasChanges = true;
   }
-  if (prevState.y !== currentState.y) {
-    delta.y = quantizePosition(currentState.y);
+  if (prevState.py !== currentState.py) {
+    delta.py = quantizePosition(currentState.py);
     hasChanges = true;
   }
-  if (prevState.z !== currentState.z) {
-    delta.z = quantizePosition(currentState.z);
+  if (prevState.pz !== currentState.pz) {
+    delta.pz = quantizePosition(currentState.pz);
     hasChanges = true;
   }
 
   // Check rotation changes
-  if (prevState.yaw !== currentState.yaw) {
-    delta.yaw = quantizeRotation(currentState.yaw);
+  if (prevState.ry !== currentState.ry) {
+    delta.ry = quantizeRotation(currentState.ry);
     hasChanges = true;
   }
-  if (prevState.pitch !== currentState.pitch) {
-    delta.pitch = quantizeRotation(currentState.pitch);
+  if (prevState.rp !== currentState.rp) {
+    delta.rp = quantizeRotation(currentState.rp);
     hasChanges = true;
   }
 
   // Check other state changes
-  if (prevState.speed !== currentState.speed) {
-    delta.speed = currentState.speed;
+  if (prevState.gait !== currentState.gait) {
+    delta.gait = currentState.gait;
     hasChanges = true;
   }
-  if (prevState.isGrounded !== currentState.isGrounded) {
-    delta.isGrounded = currentState.isGrounded;
+  if (prevState.docked !== currentState.docked) {
+    delta.docked = currentState.docked;
     hasChanges = true;
   }
-  if (prevState.velocityY !== currentState.velocityY) {
-    delta.velocityY = quantizePosition(currentState.velocityY);
+  if (prevState.ascend !== currentState.ascend) {
+    delta.ascend = quantizePosition(currentState.ascend);
     hasChanges = true;
   }
   if (prevState.health !== currentState.health) {
@@ -1125,55 +1125,57 @@ io.on('connection', async (socket) => {
       return;
     }
     
-    // Reset ban if expired
+    // Anticheat: Reset flag tally if ban expired
     if (p.isBanned && Date.now() >= p.banExpiry) {
       p.isBanned = false;
-      p.anticheatWarnings = 0;
+      p.infractionTally = 0;
       console.log(`[Anticheat] Ban expired for ${p.username}`);
     }
     
-    // Anticheat: Speed check
-    const speed = Math.abs(snap.speed || 0);
-    if (speed > MAX_SPEED) {
-      p.anticheatWarnings++;
-      p.lastAnticheatWarning = Date.now();
-      console.log(`[Anticheat] Speed violation for ${p.username}: ${speed} > ${MAX_SPEED} (Warning ${p.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
+    // Anticheat: Pace check
+    const reportedPace = Math.abs(snap.gait || 0);
+    if (reportedPace > PACE_LIMIT) {
+      p.infractionTally++;
+      p.infractionMoment = Date.now();
+      console.log(`[Anticheat] Pace violation for ${p.username}: ${reportedPace} > ${PACE_LIMIT} (Warning ${p.infractionTally}/${INFRACTION_CAP})`);
       
-      if (p.anticheatWarnings >= ANTICHEAT_WARNINGS_THRESHOLD) {
-        kickPlayerForCheating(socket, p, 'Speed hacking detected');
+      if (p.infractionTally >= INFRACTION_CAP) {
+        disqualifyNow(socket, p, 'Speed hacking detected');
         return;
       }
     }
     
-    // Anticheat: Height/Flight check (account for eye height)
-    const eyeHeight = 1.65; // Match client EYE_HEIGHT
-    const groundHeight = (snap.y || 0) - eyeHeight;
-    // Allow some tolerance for jumping (normal jump reaches ~1-2 units above ground)
-    const maxJumpHeight = 8.0; // Maximum reasonable jump height (increased for safety)
-    if (groundHeight > maxJumpHeight && !snap.isGrounded) {
-      p.anticheatWarnings++;
-      p.lastAnticheatWarning = Date.now();
-      console.log(`[Anticheat] Height violation for ${p.username}: ${groundHeight} > ${maxJumpHeight} (Warning ${p.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
+    // Anticheat: Altitude check (account for eye height). The map has tall
+    // ramps/platforms that are exited airborne, so the ceiling is VERY generous
+    // — only blatant flight (way above the tallest structure, not grounded)
+    // trips it. Walking up a ramp never does.
+    const viewpointLift = 1.65; // Match client EYE_HEIGHT
+    const claimedAltitude = (snap.py || 0) - viewpointLift;
+    const altitudeAllowance = 45.0; // Units above the baseplate before it looks like flight
+    if (claimedAltitude > altitudeAllowance && !snap.docked) {
+      p.infractionTally++;
+      p.infractionMoment = Date.now();
+      console.log(`[Anticheat] Altitude violation for ${p.username}: ${claimedAltitude} > ${altitudeAllowance} (Warning ${p.infractionTally}/${INFRACTION_CAP})`);
       
-      if (p.anticheatWarnings >= ANTICHEAT_WARNINGS_THRESHOLD) {
-        kickPlayerForCheating(socket, p, 'Flight hacking detected');
+      if (p.infractionTally >= INFRACTION_CAP) {
+        disqualifyNow(socket, p, 'Flight hacking detected');
         return;
       }
     }
     
-    p.x = clamp(snap.x, -99, 99);
-    p.y = Math.max(0, snap.y);
-    p.z = clamp(snap.z, -99, 99);
-    p.yaw = snap.yaw || 0;
-    p.pitch = clamp(snap.pitch || 0, -Math.PI / 2, Math.PI / 2);
-    p.speed = Math.abs(snap.speed || 0);
-    p.isGrounded = !!snap.isGrounded;
-    p.velocityY = snap.velocityY || 0; // Store vertical velocity for jump animation sync
+    p.px = clamp(snap.px, -99, 99);
+    p.py = Math.max(0, snap.py);
+    p.pz = clamp(snap.pz, -99, 99);
+    p.ry = snap.ry || 0;
+    p.rp = clamp(snap.rp || 0, -Math.PI / 2, Math.PI / 2);
+    p.gait = Math.abs(snap.gait || 0);
+    p.docked = !!snap.docked;
+    p.ascend = snap.ascend || 0; // Store vertical velocity for jump animation sync
     p.lastSeen = Date.now();
 
     // Emotes are cancelled by ANY movement. The server enforces this so all
     // clients stay in sync even if a player's client misbehaves.
-    if (p.currentEmote && (p.speed > 0.1 || !p.isGrounded)) {
+    if (p.currentEmote && (p.gait > 0.1 || !p.docked)) {
       p.currentEmote = null;
       broadcastToNearby('player_emote_stop', { id: socket.id }, p);
     }
@@ -1227,12 +1229,12 @@ io.on('connection', async (socket) => {
     
     // Only check fire rate for sniper (AR is meant to be rapid fire)
     if (shooter.currentWeapon === 'sniper' && timeSinceLastShot < minFireRate - latencyTolerance) {
-      shooter.anticheatWarnings++;
-      shooter.lastAnticheatWarning = now;
-      console.log(`[Anticheat] Fire rate violation for ${shooter.username}: ${timeSinceLastShot}ms < ${minFireRate - latencyTolerance}ms (Warning ${shooter.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
+      shooter.infractionTally++;
+      shooter.infractionMoment = now;
+      console.log(`[Anticheat] Fire rate violation for ${shooter.username}: ${timeSinceLastShot}ms < ${minFireRate - latencyTolerance}ms (Warning ${shooter.infractionTally}/${INFRACTION_CAP})`);
       
-      if (shooter.anticheatWarnings >= ANTICHEAT_WARNINGS_THRESHOLD) {
-        kickPlayerForCheating(socket, shooter, 'Rapid fire hacking detected');
+      if (shooter.infractionTally >= INFRACTION_CAP) {
+        disqualifyNow(socket, shooter, 'Rapid fire hacking detected');
         return;
       }
     }
@@ -1252,12 +1254,12 @@ io.on('connection', async (socket) => {
     
     // Allow small margin of error for network latency but catch obvious damage hacks
     if (clientDamage > expectedDamage * 1.5) {
-      shooter.anticheatWarnings++;
-      shooter.lastAnticheatWarning = now;
-      console.log(`[Anticheat] Damage violation for ${shooter.username}: ${clientDamage} > ${expectedDamage * 1.5} (Warning ${shooter.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
+      shooter.infractionTally++;
+      shooter.infractionMoment = now;
+      console.log(`[Anticheat] Damage violation for ${shooter.username}: ${clientDamage} > ${expectedDamage * 1.5} (Warning ${shooter.infractionTally}/${INFRACTION_CAP})`);
       
-      if (shooter.anticheatWarnings >= ANTICHEAT_WARNINGS_THRESHOLD) {
-        kickPlayerForCheating(socket, shooter, 'Damage hacking detected');
+      if (shooter.infractionTally >= INFRACTION_CAP) {
+        disqualifyNow(socket, shooter, 'Damage hacking detected');
         return;
       }
     }
@@ -1360,12 +1362,12 @@ io.on('connection', async (socket) => {
     // the SAME weapon is being reloaded again (switching guns mid-reload is
     // legitimate and must not trip the anti-cheat).
     if (p.isReloading && p.lastReloadWeapon === p.currentWeapon && timeSinceLastReload < minReloadTime * 0.8) {
-      p.anticheatWarnings++;
-      p.lastAnticheatWarning = now;
-      console.log(`[Anticheat] Reload time violation for ${p.username}: ${timeSinceLastReload}ms < ${minReloadTime * 0.8}ms (Warning ${p.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
+      p.infractionTally++;
+      p.infractionMoment = now;
+      console.log(`[Anticheat] Reload time violation for ${p.username}: ${timeSinceLastReload}ms < ${minReloadTime * 0.8}ms (Warning ${p.infractionTally}/${INFRACTION_CAP})`);
       
-      if (p.anticheatWarnings >= ANTICHEAT_WARNINGS_THRESHOLD) {
-        kickPlayerForCheating(socket, p, 'Reload hacking detected');
+      if (p.infractionTally >= INFRACTION_CAP) {
+        disqualifyNow(socket, p, 'Reload hacking detected');
         return;
       }
     }
@@ -1404,12 +1406,12 @@ io.on('connection', async (socket) => {
     
     // Allow 20% margin for network latency but catch obvious reload hacks
     if (reloadDuration < expectedReloadTime * 0.8) {
-      p.anticheatWarnings++;
-      p.lastAnticheatWarning = now;
-      console.log(`[Anticheat] Reload completion time violation for ${p.username}: ${reloadDuration}ms < ${expectedReloadTime * 0.8}ms (Warning ${p.anticheatWarnings}/${ANTICHEAT_WARNINGS_THRESHOLD})`);
+      p.infractionTally++;
+      p.infractionMoment = now;
+      console.log(`[Anticheat] Reload completion time violation for ${p.username}: ${reloadDuration}ms < ${expectedReloadTime * 0.8}ms (Warning ${p.infractionTally}/${INFRACTION_CAP})`);
       
-      if (p.anticheatWarnings >= ANTICHEAT_WARNINGS_THRESHOLD) {
-        kickPlayerForCheating(socket, p, 'Instant reload hacking detected');
+      if (p.infractionTally >= INFRACTION_CAP) {
+        disqualifyNow(socket, p, 'Instant reload hacking detected');
         return;
       }
     }
@@ -1493,7 +1495,7 @@ async function killPlayer(victimId, killerId) {
     if (!p) return;
     const s = nextSpawn();
     const now = Date.now();
-    p.x = s.x; p.y = s.y; p.z = s.z;
+    p.px = s.x; p.py = s.y; p.pz = s.z;
     p.health = MAX_HP;
     p.isDead = false;
     // Reset weapon anticheat tracking on respawn
@@ -1514,9 +1516,9 @@ setInterval(() => {
   const deltas = new Map();
   for (const [id, p] of players) {
     const currentState = {
-      x: p.x, y: p.y, z: p.z,
-      yaw: p.yaw, pitch: p.pitch,
-      speed: p.speed, isGrounded: p.isGrounded,
+      px: p.px, py: p.py, pz: p.pz,
+      ry: p.ry, rp: p.rp,
+      gait: p.gait, docked: p.docked,
       health: p.health, isDead: p.isDead,
       username: p.username,
       currentWeapon: p.currentWeapon || 'ar',

@@ -87,24 +87,24 @@ export class NetworkManager {
         
         // Get or create full state for this player
         const fullState = this._fullState.get(id) || {
-          x: 0, y: 0, z: 0,
-          yaw: 0, pitch: 0,
-          speed: 0, isGrounded: true,
-          velocityY: 0,
+          px: 0, py: 0, pz: 0,
+          ry: 0, rp: 0,
+          gait: 0, docked: true,
+          ascend: 0,
           health: 100, isDead: false,
           username: '',
           currentWeapon: 'ar',
         };
         
         // Apply delta to full state
-        if (delta.x !== undefined) fullState.x = delta.x;
-        if (delta.y !== undefined) fullState.y = delta.y;
-        if (delta.z !== undefined) fullState.z = delta.z;
-        if (delta.yaw !== undefined) fullState.yaw = delta.yaw;
-        if (delta.pitch !== undefined) fullState.pitch = delta.pitch;
-        if (delta.speed !== undefined) fullState.speed = delta.speed;
-        if (delta.isGrounded !== undefined) fullState.isGrounded = delta.isGrounded;
-        if (delta.velocityY !== undefined) fullState.velocityY = delta.velocityY;
+        if (delta.px !== undefined) fullState.px = delta.px;
+        if (delta.py !== undefined) fullState.py = delta.py;
+        if (delta.pz !== undefined) fullState.pz = delta.pz;
+        if (delta.ry !== undefined) fullState.ry = delta.ry;
+        if (delta.rp !== undefined) fullState.rp = delta.rp;
+        if (delta.gait !== undefined) fullState.gait = delta.gait;
+        if (delta.docked !== undefined) fullState.docked = delta.docked;
+        if (delta.ascend !== undefined) fullState.ascend = delta.ascend;
         if (delta.health !== undefined) fullState.health = delta.health;
         if (delta.isDead !== undefined) fullState.isDead = delta.isDead;
         if (delta.username !== undefined) fullState.username = delta.username;
@@ -185,15 +185,15 @@ export class NetworkManager {
     const angleThreshold = 0.001; // Small threshold for rotation
     
     const posChanged = 
-      Math.abs(snapshot.x - this._lastSentSnapshot.x) > threshold ||
-      Math.abs(snapshot.y - this._lastSentSnapshot.y) > threshold ||
-      Math.abs(snapshot.z - this._lastSentSnapshot.z) > threshold;
+      Math.abs(snapshot.px - this._lastSentSnapshot.px) > threshold ||
+      Math.abs(snapshot.py - this._lastSentSnapshot.py) > threshold ||
+      Math.abs(snapshot.pz - this._lastSentSnapshot.pz) > threshold;
     
     const rotChanged =
-      Math.abs(snapshot.yaw - this._lastSentSnapshot.yaw) > angleThreshold ||
-      Math.abs(snapshot.pitch - this._lastSentSnapshot.pitch) > angleThreshold;
+      Math.abs(snapshot.ry - this._lastSentSnapshot.ry) > angleThreshold ||
+      Math.abs(snapshot.rp - this._lastSentSnapshot.rp) > angleThreshold;
     
-    const stateChanged = snapshot.isGrounded !== this._lastSentSnapshot.isGrounded;
+    const stateChanged = snapshot.docked !== this._lastSentSnapshot.docked;
 
     if (posChanged || rotChanged || stateChanged) {
       this._lastSentSnapshot = snapshot;
@@ -229,13 +229,13 @@ export class NetworkManager {
 
 function lerpSnap(a, b, t) {
   return {
-    x: lerp(a.x, b.x, t),
-    y: lerp(a.y, b.y, t),
-    z: lerp(a.z, b.z, t),
-    yaw:   lerpAngle(a.yaw, b.yaw, t),
-    pitch: lerp(a.pitch, b.pitch, t),
-    speed: lerp(a.speed || 0, b.speed || 0, t),
-    isGrounded: b.isGrounded,
+    px: lerp(a.px, b.px, t),
+    py: lerp(a.py, b.py, t),
+    pz: lerp(a.pz, b.pz, t),
+    ry:   lerpAngle(a.ry, b.ry, t),
+    rp: lerp(a.rp, b.rp, t),
+    gait: lerp(a.gait || 0, b.gait || 0, t),
+    docked: b.docked,
   };
 }
 
