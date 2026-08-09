@@ -43,11 +43,10 @@ const MAX_HP = 100;
 const RESPAWN_S = 3;
 
 // Interest management: only replicate players within this horizontal radius.
-// The sniper has maxRange 200, so this must not dip below that or legitimate
-// long-range shots would stop rendering. 200 covers essentially the whole
-// 150x150 map except the far corners, so it is gameplay-neutral yet still
-// drops the few players a given client will never engage.
-const VIEW_RANGE = 200.0;
+// The 200x200 map has a corner-to-corner distance of ~283, so this must cover
+// the full arena — distant players are still visible and shootable (the sniper
+// has maxRange 200). 300 covers the whole map with margin.
+const VIEW_RANGE = 300.0;
 
 // ════════════════════════════════════════════════════════════════════════════
 //  EMOTE MANIFEST  (auto-detected from /emote animations/)
@@ -360,15 +359,16 @@ async function connectToMongo() {
 
 connectToMongo();
 
+// Spawn points for the 200x200 GLB map (walls at +-99).
 const SPAWNS = [
-  { x: -60, y: 0, z: 0 },
-  { x:  60, y: 0, z: 0 },
-  { x:   0, y: 0, z: -60 },
-  { x:   0, y: 0, z: 60 },
-  { x: -40, y: 0, z: -40 },
-  { x:  40, y: 0, z: -40 },
-  { x: -40, y: 0, z: 40 },
-  { x:  40, y: 0, z: 40 },
+  { x: 0,   y: 0, z: 0 },
+  { x: -30, y: 0, z: 30 },
+  { x: 30,  y: 0, z: -30 },
+  { x: 0,   y: 0, z: 60 },
+  { x: 0,   y: 0, z: -60 },
+  { x: 60,  y: 0, z: 0 },
+  { x: -45, y: 0, z: 20 },
+  { x: -30, y: 0, z: -30 },
 ];
 
 const COLORS = [0xff4444, 0x44aaff, 0x44ff88, 0xffcc44, 0xcc44ff, 0xff8844];
@@ -1156,9 +1156,9 @@ io.on('connection', async (socket) => {
       }
     }
     
-    p.x = clamp(snap.x, -74, 74);
+    p.x = clamp(snap.x, -99, 99);
     p.y = Math.max(0, snap.y);
-    p.z = clamp(snap.z, -74, 74);
+    p.z = clamp(snap.z, -99, 99);
     p.yaw = snap.yaw || 0;
     p.pitch = clamp(snap.pitch || 0, -Math.PI / 2, Math.PI / 2);
     p.speed = Math.abs(snap.speed || 0);

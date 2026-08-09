@@ -19,17 +19,19 @@ const TICK_MS = 1000 / 30;
 const MAX_HP = 100;
 const RESPAWN_S = 3;
 // Match client/server wire parser. Must stay in sync with the real server.
-const VIEW_RANGE = 200.0;
+// Covers the whole 200x200 map (corner-to-corner ~283).
+const VIEW_RANGE = 300.0;
 
+// Spawn points for the 200x200 GLB map (walls at +-99).
 const SPAWNS = [
-  { x: -60, y: 0, z: 0 },
-  { x:  60, y: 0, z: 0 },
-  { x:   0, y: 0, z: -60 },
-  { x:   0, y: 0, z: 60 },
-  { x: -40, y: 0, z: -40 },
-  { x:  40, y: 0, z: -40 },
-  { x: -40, y: 0, z: 40 },
-  { x:  40, y: 0, z: 40 },
+  { x: 0,   y: 0, z: 0 },
+  { x: -30, y: 0, z: 30 },
+  { x: 30,  y: 0, z: -30 },
+  { x: 0,   y: 0, z: 60 },
+  { x: 0,   y: 0, z: -60 },
+  { x: 60,  y: 0, z: 0 },
+  { x: -45, y: 0, z: 20 },
+  { x: -30, y: 0, z: -30 },
 ];
 
 const COLORS = [0xff4444, 0x44aaff, 0x44ff88, 0xffcc44, 0xcc44ff, 0xff8844];
@@ -131,9 +133,9 @@ io.on('connection', (socket) => {
   socket.on('move', (snap) => {
     const p = players.get(socket.id);
     if (!p || p.isDead) return;
-    p.x = clamp(snap.x, -74, 74);
+    p.x = clamp(snap.x, -99, 99);
     p.y = Math.max(0, snap.y);
-    p.z = clamp(snap.z, -74, 74);
+    p.z = clamp(snap.z, -99, 99);
     p.yaw = snap.yaw || 0;
     p.pitch = clamp(snap.pitch || 0, -Math.PI / 2, Math.PI / 2);
     p.speed = Math.abs(snap.speed || 0);

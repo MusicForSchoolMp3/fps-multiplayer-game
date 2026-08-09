@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { PlayerController }        from './PlayerController.js';
 import { NetworkManager }          from './NetworkManager.js';
 import { WeaponSystem }            from './WeaponSystem.js';
@@ -627,255 +628,98 @@ async function startGame() {
   const clouds = cloudPositions.map(pos => createCloud(pos.x, pos.y, pos.z));
   window.clouds = clouds;
 
-// ── Simple Map ──────────────────────────────────────────────────────────────
-  const wallMat = new THREE.MeshLambertMaterial({ color: 0x3a4055 });
-  const floorMat = new THREE.MeshLambertMaterial({ color: 0x5a8a4a }); // Brighter green grass
-  const accentMat = new THREE.MeshLambertMaterial({ color: 0x4a5568 });
-  const buildingMat = new THREE.MeshLambertMaterial({ color: 0x5a5a6a });
-  const treeMat = new THREE.MeshLambertMaterial({ color: 0x2d5a2d });
-  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x4a3a2a });
+  // ── Map: /NEWMAP/Redblue.glb ─────────────────────────────────────────────
+  // The map is a single glTF binary asset served as a static file from the repo
+  // root by the Node/Express server, exactly like the other model folders.
+  const MAP_GLB_URL = '/NEWMAP/Redblue.glb';
 
-  // Main floor - expanded to 150x150
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(150, 150, 60, 60),
-    floorMat
-  );
-  floor.rotation.x = -Math.PI / 2;
-  scene.add(floor);
+  const mapMeshes    = [];
+  const mapColliders = [];
 
-  // Grid overlay
-  const grid = new THREE.GridHelper(150, 60, 0x607060, 0x506050);
-  grid.position.y = 0.01;
-  scene.add(grid);
-
-  // Outer walls - expanded
-  const wallHeight = 6;
-  const wallThickness = 1;
-  const MAP_SIZE = 75;
-  
-  // North wall
-  const northWall = new THREE.Mesh(
-    new THREE.BoxGeometry(150, wallHeight, wallThickness),
-    wallMat
-  );
-  northWall.position.set(0, wallHeight / 2, -MAP_SIZE);
-  scene.add(northWall);
-
-  // South wall
-  const southWall = new THREE.Mesh(
-    new THREE.BoxGeometry(150, wallHeight, wallThickness),
-    wallMat
-  );
-  southWall.position.set(0, wallHeight / 2, MAP_SIZE);
-  scene.add(southWall);
-
-  // East wall
-  const eastWall = new THREE.Mesh(
-    new THREE.BoxGeometry(wallThickness, wallHeight, 150),
-    wallMat
-  );
-  eastWall.position.set(MAP_SIZE, wallHeight / 2, 0);
-  scene.add(eastWall);
-
-  // West wall
-  const westWall = new THREE.Mesh(
-    new THREE.BoxGeometry(wallThickness, wallHeight, 150),
-    wallMat
-  );
-  westWall.position.set(-MAP_SIZE, wallHeight / 2, 0);
-  scene.add(westWall);
-
-  // Center platform
-  const centerPlatform = new THREE.Mesh(
-    new THREE.BoxGeometry(12, 0.5, 12),
-    accentMat
-  );
-  centerPlatform.position.set(0, 1.5, 0);
-  scene.add(centerPlatform);
-
-  // Four corner platforms - expanded positions
-  const cornerPositions = [
-    { x: -40, z: -40 },
-    { x: 40, z: -40 },
-    { x: -40, z: 40 },
-    { x: 40, z: 40 }
-  ];
-
-  cornerPositions.forEach(pos => {
-    const platform = new THREE.Mesh(
-      new THREE.BoxGeometry(10, 0.5, 10),
-      accentMat
-    );
-    platform.position.set(pos.x, 2, pos.z);
-    scene.add(platform);
-
-    // Ramp to platform
-    const ramp = new THREE.Mesh(
-      new THREE.BoxGeometry(5, 0.3, 8),
-      wallMat
-    );
-    ramp.position.set(pos.x * 0.7, 1, pos.z * 0.7);
-    ramp.rotation.y = Math.atan2(pos.z, pos.x) + Math.PI / 2;
-    scene.add(ramp);
-  });
-
-  // Buildings
-  const createBuilding = (x, z, w, h, d) => {
-    const building = new THREE.Mesh(
-      new THREE.BoxGeometry(w, h, d),
-      buildingMat
-    );
-    building.position.set(x, h / 2, z);
-    scene.add(building);
-    return building;
-  };
-
-  // Main buildings - reduced for performance
-  createBuilding(-30, -30, 12, 8, 12);
-  createBuilding(30, 30, 12, 8, 12);
-
-  // Smaller buildings - reduced for performance
-  createBuilding(-50, 0, 8, 5, 8);
-  createBuilding(50, 0, 8, 5, 8);
-
-  // Reduced ramps
-  const rampPositions = [
-    { x: -20, z: 0, rotY: 0 },
-    { x: 20, z: 0, rotY: Math.PI },
-    { x: 0, z: -20, rotY: Math.PI / 2 },
-    { x: 0, z: 20, rotY: -Math.PI / 2 },
-  ];
-
-  rampPositions.forEach(ramp => {
-    // Create staircase-style ramp for better collision
-    const steps = 8;
-    const stepHeight = 0.3;
-    const stepDepth = 12 / steps;
-    const rampWidth = 8;
-
-    for (let i = 0; i < steps; i++) {
-      const stepMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(rampWidth, stepHeight, stepDepth),
-        accentMat
-      );
-
-      // Calculate position along the ramp
-      const progress = i / steps;
-      const xOffset = Math.sin(ramp.rotY) * (progress * 12 - 6);
-      const zOffset = Math.cos(ramp.rotY) * (progress * 12 - 6);
-      const yOffset = 1.0 + (i * stepHeight);
-
-      stepMesh.position.set(ramp.x + xOffset, yOffset, ramp.z + zOffset);
-      stepMesh.rotation.y = ramp.rotY;
-      scene.add(stepMesh);
+  // Compute Box3 collision boxes for solid map meshes. The huge ground sheet
+  // must never become a collider (it would block ALL horizontal movement) or
+  // a bullet target, matching the previous map where bullets passed the floor.
+  function computeMapColliders(meshes) {
+    const boxes = [];
+    for (const m of meshes) {
+      m.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(m);
+      const w = box.max.x - box.min.x;
+      const d = box.max.z - box.min.z;
+      if (box.max.y <= 1.5 && w > 180 && d > 180) continue; // ground sheet
+      boxes.push(box);
     }
-  });
-
-  // Trees - use procedural trees (FBX has parsing issues)
-  const treePositions = [
-    { x: -20, z: -20 }, { x: 20, z: -20 }, { x: -20, z: 20 }, { x: 20, z: 20 },
-    { x: -60, z: -20 }, { x: 60, z: -20 }, { x: -60, z: 20 }, { x: 60, z: 20 },
-    { x: -20, z: -60 }, { x: 20, z: -60 }, { x: -20, z: 60 }, { x: 20, z: 60 },
-    { x: -40, z: 0 }, { x: 40, z: 0 }, { x: 0, z: -40 }, { x: 0, z: 40 },
-    { x: -55, z: -55 }, { x: 55, z: -55 }, { x: -55, z: 55 }, { x: 55, z: 55 },
-  ];
-
-  const createTree = (x, z) => {
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.3, 0.4, 3, 8),
-      trunkMat
-    );
-    trunk.position.set(x, 1.5, z);
-    scene.add(trunk);
-
-    const foliage = new THREE.Mesh(
-      new THREE.ConeGeometry(2, 4, 8),
-      treeMat
-    );
-    foliage.position.set(x, 4.5, z);
-    scene.add(foliage);
-  };
-  treePositions.forEach(pos => createTree(pos.x, pos.z));
-
-  // Central cover structure
-  const coverHeight = 3;
-  const coverPillar1 = new THREE.Mesh(
-    new THREE.BoxGeometry(1, coverHeight, 1),
-    wallMat
-  );
-  coverPillar1.position.set(-5, coverHeight / 2, -5);
-  scene.add(coverPillar1);
-
-  const coverPillar2 = new THREE.Mesh(
-    new THREE.BoxGeometry(1, coverHeight, 1),
-    wallMat
-  );
-  coverPillar2.position.set(5, coverHeight / 2, -5);
-  scene.add(coverPillar2);
-
-  const coverPillar3 = new THREE.Mesh(
-    new THREE.BoxGeometry(1, coverHeight, 1),
-    wallMat
-  );
-  coverPillar3.position.set(-5, coverHeight / 2, 5);
-  scene.add(coverPillar3);
-
-  const coverPillar4 = new THREE.Mesh(
-    new THREE.BoxGeometry(1, coverHeight, 1),
-    wallMat
-  );
-  coverPillar4.position.set(5, coverHeight / 2, 5);
-  scene.add(coverPillar4);
-
-  // Cover roof
-  const coverRoof = new THREE.Mesh(
-    new THREE.BoxGeometry(12, 0.3, 12),
-    accentMat
-  );
-  coverRoof.position.set(0, coverHeight + 0.15, 0);
-  scene.add(coverRoof);
-
-  // Mid-field barriers
-  for (let i = 0; i < 4; i++) {
-    const barrier = new THREE.Mesh(
-      new THREE.BoxGeometry(2, 1.5, 0.5),
-      wallMat
-    );
-    const angle = (i / 4) * Math.PI * 2;
-    barrier.position.set(Math.cos(angle) * 15, 0.75, Math.sin(angle) * 15);
-    barrier.rotation.y = angle + Math.PI / 2;
-    scene.add(barrier);
+    return boxes;
   }
 
-  // ── Collect Map Objects & Colliders ─────────────────────────────────────────
-  const mapMeshes = [
-    northWall, southWall, eastWall, westWall,
-    centerPlatform,
-    coverPillar1, coverPillar2, coverPillar3, coverPillar4,
-    coverRoof
-  ];
+  // Safety net: if the GLB is ever missing or fails to parse, build a plain
+  // flat arena so the match remains playable (players can still fight).
+  function addFallbackArena() {
+    const floorMat = new THREE.MeshLambertMaterial({ color: 0x5a8a4a });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200, 1, 1), floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    scene.add(floor);
 
-  // Include corner platforms, ramps, and mid-field barriers
-  scene.traverse(obj => {
-    if (obj.isMesh && (obj.material === wallMat || obj.material === accentMat || obj.material === buildingMat)) {
-      if (!mapMeshes.includes(obj) && obj !== floor) {
-        mapMeshes.push(obj);
-      }
+    const wallMat = new THREE.MeshLambertMaterial({ color: 0x3a4055 });
+    const wallHeight = 8;
+    const HALF = 99;
+    const defs = [
+      { pos: [0, wallHeight / 2, -HALF], size: [200, wallHeight, 1] },
+      { pos: [0, wallHeight / 2,  HALF], size: [200, wallHeight, 1] },
+      { pos: [-HALF, wallHeight / 2, 0], size: [1, wallHeight, 200] },
+      { pos: [ HALF, wallHeight / 2, 0], size: [1, wallHeight, 200] },
+    ];
+    const fallbackMeshes = [];
+    for (const d of defs) {
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(d.size[0], d.size[1], d.size[2]), wallMat);
+      wall.position.set(d.pos[0], d.pos[1], d.pos[2]);
+      scene.add(wall);
+      fallbackMeshes.push(wall);
     }
-  });
+    mapMeshes.push(...fallbackMeshes);
+    mapColliders.push(...computeMapColliders(fallbackMeshes));
+  }
 
-  // Create Box3 colliders for PlayerController physics
-  const mapColliders = mapMeshes.map(m => {
-    m.updateMatrixWorld(true);
-    return new THREE.Box3().setFromObject(m);
-  });
+  try {
+    const gltf = await new Promise((resolve, reject) => {
+      new GLTFLoader().load(MAP_GLB_URL, resolve, undefined, reject);
+    });
+
+    const mapRoot = gltf.scene;
+
+    mapRoot.traverse((child) => {
+      if (!child.isMesh) return;
+
+      const srcMat = Array.isArray(child.material) ? child.material[0] : child.material;
+      const matName = (srcMat && srcMat.name) || '';
+
+      // Convert to the same flat Lambert look the rest of the game uses and
+      // brighten the dark GLB materials so the arena reads clearly in-game.
+      const base = srcMat && srcMat.color ? srcMat.color.clone() : new THREE.Color(0x9a9a9a);
+      base.multiplyScalar(2.2);
+      base.r = Math.max(0.05, base.r);
+      base.g = Math.max(0.05, base.g);
+      base.b = Math.max(0.05, base.b);
+      child.material = new THREE.MeshLambertMaterial({ color: base });
+
+      if (matName === 'Ground') return; // floor: not a collider/bullet target
+      mapMeshes.push(child);
+    });
+
+    scene.add(mapRoot);
+    mapColliders.push(...computeMapColliders(mapMeshes));
+    console.log('[Map] Loaded ' + mapMeshes.length + ' solid meshes, ' + mapColliders.length + ' colliders');
+  } catch (mapErr) {
+    console.error('[Map] GLB load failed - using fallback arena:', mapErr);
+    addFallbackArena();
+  }
 
   // ── Ammo pickups - load FBX model
   const ammoPickups = [];
   const ammoPositions = [
-    { x: -15, z: -15 }, { x: 15, z: -15 }, { x: -15, z: 15 }, { x: 15, z: 15 },
-    { x: -35, z: 0 }, { x: 35, z: 0 }, { x: 0, z: -35 }, { x: 0, z: 35 },
-    { x: -25, z: -25 }, { x: 25, z: -25 }, { x: -25, z: 25 }, { x: 25, z: 25 },
+    { x: -25, z: -12 }, { x: 25, z: -12 }, { x: -25, z: 12 }, { x: 25, z: 12 },
+    { x: -20, z: 55 }, { x: 20, z: -55 }, { x: 55, z: 20 }, { x: -55, z: -20 },
+    { x: 40, z: -50 }, { x: -50, z: 35 }, { x: -10, z: 70 }, { x: 75, z: -10 },
   ];
 
   const fbxLoader = new FBXLoader();
@@ -934,14 +778,14 @@ async function startGame() {
   // ── Spawn points (visual indicators) ─────────────────────────────────────────
   const spawnMat = new THREE.MeshLambertMaterial({ color: 0x6688aa });
   const spawnPositions = [
-    { x: -20, z: -20 },
-    { x: 20, z: -20 },
-    { x: -20, z: 20 },
-    { x: 20, z: 20 },
     { x: 0, z: 0 },
-    { x: -35, z: 0 },
-    { x: 35, z: 0 },
-    { x: 0, z: -35 }
+    { x: -30, z: 30 },
+    { x: 30, z: -30 },
+    { x: 0, z: 60 },
+    { x: 0, z: -60 },
+    { x: 60, z: 0 },
+    { x: -45, z: 20 },
+    { x: -30, z: -30 }
   ];
 
   spawnPositions.forEach(pos => {

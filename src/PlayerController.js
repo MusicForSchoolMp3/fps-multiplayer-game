@@ -213,8 +213,8 @@ export class PlayerController {
       }
     }
 
-    // Clamp to play area boundary
-    const BOUND = 74.0;
+    // Clamp to play area boundary (200x200 map, walls at +-100)
+    const BOUND = 99.0;
     this.position.x = Math.max(-BOUND, Math.min(BOUND, this.position.x));
     this.position.z = Math.max(-BOUND, Math.min(BOUND, this.position.z));
 
