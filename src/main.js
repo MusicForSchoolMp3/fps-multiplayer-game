@@ -629,8 +629,8 @@ async function startGame() {
   window.clouds = clouds;
 
   // ── Map: /NEWMAP/Redblue.glb ─────────────────────────────────────────────
-  // The map is a single glTF binary asset served as a static file from the repo
-  // root by the Node/Express server, exactly like the other model folders.
+  // The map is a single glTF binary asset living in /public (so the Vite dev
+  // server and the production build both serve it at /NEWMAP/Redblue.glb).
   const MAP_GLB_URL = '/NEWMAP/Redblue.glb';
 
   const mapMeshes    = [];

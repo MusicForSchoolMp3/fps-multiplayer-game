@@ -949,6 +949,11 @@ app.use(express.static(DIST_DIR, {
     // For hashed assets (Vite build outputs), cache aggressively
     if (filePath.includes('.')) {
       const ext = filePath.split('.').pop().toLowerCase();
+      // The app shell (index.html for any SPA route) must always revalidate so
+      // updates actually reach players without a manual cache clear.
+      if (ext === 'html') {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
       // Cache static assets with long duration
       if (['js', 'css', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'woff', 'woff2', 'ttf', 'eot'].includes(ext)) {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
