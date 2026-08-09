@@ -1,6 +1,11 @@
 // ─── PlayerController.js ──────────────────────────────────────────────────────
 // Handles all local player input, physics movement, camera control (pointer lock),
 // and first-person weapon bob.
+//
+// Movement is raycast-based: the player is treated as a ~0.35m radius capsule
+// that sweeps along each movement axis and snaps down onto whatever surface is
+// below. Because we raycast against the real meshes (not Box3 AABBs) rotated
+// ramps, stairs, low steps and doorways all behave exactly like they look.
 
 import * as THREE from 'three';
 
@@ -11,6 +16,10 @@ const GRAVITY      = -22.0;
 const EYE_HEIGHT   = 1.65; // metres above feet
 const PLAYER_RADIUS = 0.35;
 const GROUND_Y     = 0.0;  // baseplate surface
+
+const SNAP_DISTANCE = 0.45; // how far below we can fall-snap onto a surface per frame (also ramp climb rate)
+const STEP_HEIGHT   = 0.55; // max ledge height auto-stepped without jumping
+const MARGIN        = 0.02; // collision slack
 
 export class PlayerController {
   constructor(camera, domElement) {
@@ -40,18 +49,24 @@ export class PlayerController {
     // Head bob toggle setting
     this.enableHeadBob = true;
 
-    // Map colliders (array of THREE.Box3)
+    // Map colliders: actual THREE.Mesh objects, raycast against real geometry
     this.colliders = [];
+
+    // Fallback floor height (used when no surface is found below)
+    this.groundY = GROUND_Y;
 
     // Recoil
     this.recoilPitch = 0;
 
     this._locked = false;
+    this._raycaster = new THREE.Raycaster();
+
     this._setupListeners();
   }
 
-  setColliders(boxes) {
-    this.colliders = boxes;
+  setColliders(meshes) {
+    this.colliders = meshes || [];
+    for (const m of this.colliders) m.updateMatrixWorld(true);
   }
 
   setGroundY(y) {
@@ -137,80 +152,19 @@ export class PlayerController {
       this.velocity.y += GRAVITY * delta;
     }
 
+    // Keep world matrices fresh so raycasts follow moved/rotated colliders
+    for (const m of this.colliders) m.updateMatrixWorld(true);
+
     // ── Movement & Map Collisions ───────────────────────────────────────────
-    const moveX = this.velocity.x * delta;
-    const moveZ = this.velocity.z * delta;
-    const moveY = this.velocity.y * delta;
+    this._sweepHorizontal(1, this.velocity.x * delta); // X axis
+    this._sweepHorizontal(2, this.velocity.z * delta); // Z axis
+    this._applyVertical(this.velocity.y * delta);
 
-    const r = PLAYER_RADIUS;
-
-    // Move X & resolve horizontal X collisions
-    if (moveX !== 0) {
-      this.position.x += moveX;
-      const feetY = this.position.y - EYE_HEIGHT;
-      const headY = this.position.y;
-      for (const box of this.colliders) {
-        if (feetY < box.max.y && headY > box.min.y &&
-            this.position.z + r > box.min.z && this.position.z - r < box.max.z) {
-          if (moveX > 0 && this.position.x + r > box.min.x && this.position.x - r < box.min.x) {
-            this.position.x = box.min.x - r;
-          } else if (moveX < 0 && this.position.x - r < box.max.x && this.position.x + r > box.max.x) {
-            this.position.x = box.max.x + r;
-          }
-        }
-      }
-    }
-
-    // Move Z & resolve horizontal Z collisions
-    if (moveZ !== 0) {
-      this.position.z += moveZ;
-      const feetY = this.position.y - EYE_HEIGHT;
-      const headY = this.position.y;
-      for (const box of this.colliders) {
-        if (feetY < box.max.y && headY > box.min.y &&
-            this.position.x + r > box.min.x && this.position.x - r < box.max.x) {
-          if (moveZ > 0 && this.position.z + r > box.min.z && this.position.z - r < box.min.z) {
-            this.position.z = box.min.z - r;
-          } else if (moveZ < 0 && this.position.z - r < box.max.z && this.position.z + r > box.max.z) {
-            this.position.z = box.max.z + r;
-          }
-        }
-      }
-    }
-
-    // Move Y & resolve vertical ground/platform collisions
-    this.position.y += moveY;
-
-    let supportY = GROUND_Y;
-    const feetY = this.position.y - EYE_HEIGHT;
-
-    for (const box of this.colliders) {
-      const horizontalOverlap = (
-        this.position.x + r * 0.7 > box.min.x &&
-        this.position.x - r * 0.7 < box.max.x &&
-        this.position.z + r * 0.7 > box.min.z &&
-        this.position.z - r * 0.7 < box.max.z
-      );
-
-      if (horizontalOverlap) {
-        // Platform top support (stepping on platform)
-        // Increased tolerance for ramps and platforms
-        if (box.max.y <= feetY + 0.6 && box.max.y >= supportY) {
-          supportY = box.max.y;
-        }
-      }
-    }
-
-    // Ground & platform snapping
-    const minTargetY = supportY + EYE_HEIGHT;
-    if (this.position.y <= minTargetY) {
-      this.position.y = minTargetY;
+    // Fallback floor (keeps the player off infinite falls if the floor has no collider)
+    if (this.position.y - EYE_HEIGHT < this.groundY) {
+      this.position.y = this.groundY + EYE_HEIGHT;
       this.velocity.y = 0;
-      this.isGrounded  = true;
-    } else {
-      if (this.isGrounded && this.position.y > minTargetY + 0.1) {
-        this.isGrounded = false;
-      }
+      this.isGrounded = true;
     }
 
     // Clamp to play area boundary (200x200 map, walls at +-100)
@@ -243,6 +197,143 @@ export class PlayerController {
     );
     this.camera.quaternion.setFromEuler(euler);
     this.camera.position.copy(this.position).add(new THREE.Vector3(0, bobY, 0));
+  }
+
+  // ── Raycast helpers ─────────────────────────────────────────────────────────
+  // Returns the closest Intersection or null. Up-facing surfaces (floors/ramps)
+  // are returned with `floor` truthy so horizontal sweeps can ignore them.
+  _raycast(origin, dirVec, maxDist) {
+    this._raycaster.set(origin, dirVec);
+    this._raycaster.far = maxDist;
+    const hits = this._raycaster.intersectObjects(this.colliders, true);
+    if (hits.length === 0) return null;
+
+    const hit = hits[0];
+    hit.floor = hit.faceNormal !== undefined
+      ? hit.faceNormal.y > 0.05
+      : hit.face.normal.clone().transformDirection(hit.object.matrixWorld).y > 0.05;
+    return hit;
+  }
+
+  // Sweep the capsule along one horizontal axis. axis: 1 = X, 2 = Z.
+  // 3 probe heights (feet / chest / head) × 3 lateral offsets, so capsule width
+  // is honored and corner clipping stays impossible.
+  _sweepHorizontal(axis, dist) {
+    if (dist === 0) return;
+
+    const sign = Math.sign(dist);
+    const size = Math.abs(dist);
+    const lead = sign * PLAYER_RADIUS;
+    const offs = [0, PLAYER_RADIUS * 0.85, -PLAYER_RADIUS * 0.85];
+
+    let travel = size;
+
+    for (const off of offs) {
+      for (const h of [0.12, 1.0, EYE_HEIGHT - 0.12]) {
+        const origin = new THREE.Vector3(
+          this.position.x + (axis === 1 ? lead : off),
+          this.position.y - EYE_HEIGHT + h,
+          this.position.z + (axis === 2 ? lead : off)
+        );
+        const rayDir = axis === 1
+          ? new THREE.Vector3(sign, 0, 0)
+          : new THREE.Vector3(0, 0, sign);
+        const hit = this._raycast(origin, rayDir, size + PLAYER_RADIUS + MARGIN);
+        if (!hit) continue;
+        if (hit.floor) continue; // floors/ramps never block horizontal motion
+        travel = Math.max(0, Math.min(travel, hit.distance - PLAYER_RADIUS - MARGIN));
+      }
+    }
+
+    if (axis === 1) this.position.x += sign * travel;
+    else             this.position.z += sign * travel;
+
+    // Auto-step small ledges instead of getting stuck on their vertical faces
+    if (travel < size - 1e-4) {
+      this._tryStepUp(axis, sign, size - travel);
+    }
+  }
+
+  // Try to step onto a ledge (or the start of a ramp) up to STEP_HEIGHT tall.
+  // Only commits if there is headroom and the path is clear at the raised height.
+  _tryStepUp(axis, sign, remaining) {
+    const raisedFeet = this.position.y - EYE_HEIGHT + STEP_HEIGHT;
+
+    const headCheck = this._raycast(
+      new THREE.Vector3(this.position.x, raisedFeet + EYE_HEIGHT, this.position.z),
+      new THREE.Vector3(0, 1, 0),
+      STEP_HEIGHT + MARGIN
+    );
+    if (headCheck && !headCheck.floor) return;
+
+    const lead = sign * (PLAYER_RADIUS + 0.05);
+    for (const off of [0, PLAYER_RADIUS * 0.85, -PLAYER_RADIUS * 0.85]) {
+      const origin = new THREE.Vector3(
+        this.position.x + (axis === 1 ? lead : off),
+        raisedFeet + 0.35,
+        this.position.z + (axis === 2 ? lead : off)
+      );
+      const rayDir = axis === 1
+        ? new THREE.Vector3(sign, 0, 0)
+        : new THREE.Vector3(0, 0, sign);
+      const hit = this._raycast(origin, rayDir, remaining + PLAYER_RADIUS + MARGIN);
+      if (hit && !hit.floor) return; // still blocked at the raised height
+    }
+
+    // Commit the step: raise, then finish the move
+    this.position.y = raisedFeet + EYE_HEIGHT;
+    if (axis === 1) this.position.x += sign * remaining;
+    else            this.position.z += sign * remaining;
+  }
+
+  // Vertical movement: rises with ceiling blocking, falls with ground/ramp
+  // snapping. Ramps climb for free: after moving horizontally into the slope,
+  // the down-ray lands the feet on whatever surface is up to SNAP_DISTANCE above.
+  _applyVertical(moveY) {
+    const feet = this.position.y - EYE_HEIGHT;
+
+    // Rising: clamp against ceilings
+    if (moveY > 0) {
+      const hit = this._raycast(
+        new THREE.Vector3(this.position.x, this.position.y, this.position.z),
+        new THREE.Vector3(0, 1, 0),
+        moveY + MARGIN
+      );
+      if (hit) {
+        this.position.y = hit.point.y - MARGIN;
+        this.velocity.y = 0;
+      } else {
+        this.position.y += moveY;
+      }
+      return;
+    }
+
+    // Fall (or stand): move down, then probe for a surface below
+    if (moveY < 0) this.position.y += moveY;
+
+    const probeY = feet + SNAP_DISTANCE + MARGIN;
+    const hit = this._raycast(
+      new THREE.Vector3(this.position.x, probeY, this.position.z),
+      new THREE.Vector3(0, -1, 0),
+      (moveY < 0 ? -moveY : 0) + SNAP_DISTANCE + MARGIN
+    );
+
+    if (hit) {
+      const surfaceY = hit.point.y;
+      if (surfaceY > feet - 1e-4) {
+        // ramp / platform climb or landing
+        this.position.y = surfaceY + EYE_HEIGHT;
+        this.velocity.y = 0;
+        this.isGrounded = true;
+      } else if (!this.isGrounded) {
+        // fell onto a surface slightly below (smooth landing)
+        this.position.y = surfaceY + EYE_HEIGHT;
+        this.velocity.y = 0;
+        this.isGrounded = true;
+      }
+    } else {
+      this.isGrounded = false;
+    }
   }
 
   // ── Apply recoil ────────────────────────────────────────────────────────────

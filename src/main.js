@@ -635,6 +635,8 @@ async function startGame() {
 
   const mapMeshes    = [];
   const mapColliders = [];
+  const groundSheets = [];
+  let mapGroundY = 0;
 
   // Compute Box3 collision boxes for solid map meshes. The huge ground sheet
   // must never become a collider (it would block ALL horizontal movement) or
@@ -702,7 +704,14 @@ async function startGame() {
       base.b = Math.max(0.05, base.b);
       child.material = new THREE.MeshLambertMaterial({ color: base });
 
-      if (matName === 'Ground') return; // floor: not a collider/bullet target
+      if (matName === 'Ground') {
+        // floor: never a bullet target, but kept as a walkable surface for the
+        // raycast player controller (its up-facing faces are ignored by sweeps)
+        child.updateMatrixWorld(true);
+        mapGroundY = new THREE.Box3().setFromObject(child).max.y;
+        groundSheets.push(child);
+        return;
+      }
       mapMeshes.push(child);
     });
 
@@ -800,7 +809,11 @@ async function startGame() {
 
   // ── Controller ────────────────────────────────────────────────────────────
   controller = new PlayerController(camera, canvas);
-  controller.setColliders(mapColliders);
+  // Raycast against the real geometry (rotated ramps, doorways, stairs) instead
+  // of fat Box3 AABBs. Ground sheets are included: their up-facing faces can't
+  // block horizontal movement, but they catch the player on fall.
+  controller.setColliders([...mapMeshes, ...groundSheets]);
+  controller.setGroundY(mapGroundY);
 
   // ── Network ───────────────────────────────────────────────────────────────
   net = new NetworkManager(SERVER_URL, sessionToken, sessionUsername);
