@@ -8,13 +8,20 @@ import { MongoClient } from 'mongodb';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-import { readdirSync } from 'fs';
+import { dirname, join, extname } from 'path';
+import { readdirSync, existsSync } from 'fs';
+import 'dotenv/config';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Project root and the production frontend build (absolute paths, so the server
+// behaves identically no matter which directory it is launched from).
+const ROOT = join(__dirname, '..');
+const DIST_DIR = join(ROOT, 'dist');
+
 const PORT = process.env.PORT || 3001;
+const HOST = process.env.HOST || '0.0.0.0';
 const TICK_MS = 1000 / 18; // Reduced from 30Hz to 18Hz for bandwidth optimization
 const MAX_HP = 100;
 const RESPAWN_S = 3;
@@ -200,10 +207,17 @@ const WEAPONS = {
   }
 };
 
-// JWT secret for token validation
-const JWT_SECRET = process.env.JWT_SECRET || 'fps-game-secret-key-change-in-production';
+// JWT secret for token validation. MUST come from the environment — a missing
+// secret in production is a fatal misconfiguration (tokens could be forged).
+const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? null : 'fps-game-dev-secret-key');
+if (!JWT_SECRET) {
+  console.error('[FATAL] JWT_SECRET is not set. Add it to .env — e.g.:');
+  console.error('        JWT_SECRET=$(openssl rand -hex 32)');
+  process.exit(1);
+}
 
-// MongoDB connection
+// MongoDB connection. Production must set MONGODB_URI in .env. The localhost
+// fallback exists only for local development without a configured database.
 const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/fps-game';
 let db = null;
 let accountsCollection = null;
@@ -316,7 +330,14 @@ async function connectToMongo() {
     // Load every account's kills into the live leaderboard index.
     await loadLiveLeaderboard();
   } catch (error) {
-    console.error('MongoDB connection error:', error);
+    console.error('############################################################');
+    console.error('# MongoDB CONNECTION FAILURE                              #');
+    console.error('#                                                          #');
+    console.error('#  Registrations, logins, the leaderboard and kill-saving #');
+    console.error('#  are UNAVAILABLE until this is fixed.                    #');
+    console.error('#                                                          #');
+    console.error(`#  ${String(error.message || error)}`);
+    console.error('############################################################');
     console.log('Running without database - accounts will not persist');
   }
 }
@@ -549,15 +570,42 @@ function createDeltaUpdate(prevState, currentState) {
 
 const app = express();
 const http = createServer(app);
+
+// Reverse proxy compatibility: respect X-Forwarded-* headers (Nginx, etc.).
+app.set('trust proxy', true);
+
+// CORS policy.
+//   • Production: the built frontend is served by this same server (same
+//     origin), so browsers never need CORS. Cross-origin requests are blocked
+//     unless explicitly allow-listed via CORS_ORIGIN.
+//   • Development: the Vite dev server talks to this API from a different
+//     port, so all origins are permitted.
+//   • No Origin header (same-origin requests, tools, scripts) is always fine.
+const isProduction = process.env.NODE_ENV === 'production';
+const CORS_ORIGIN_ALLOWLIST = (process.env.CORS_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
+
+function isOriginAllowed(origin) {
+  if (!origin) return true; // same-origin / non-browser clients
+  if (CORS_ORIGIN_ALLOWLIST.length > 0) return CORS_ORIGIN_ALLOWLIST.includes(origin);
+  return !isProduction;
+}
+
 const io = new Server(http, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
+  cors: {
+    origin: (origin, callback) => callback(null, isOriginAllowed(origin)),
+    methods: ['GET', 'POST'],
+  },
   parser: msgpackParser, // Binary MessagePack wire format (replaces verbose JSON)
 });
 
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  const origin = req.headers.origin;
+  if (isOriginAllowed(origin)) {
+    res.header('Access-Control-Allow-Origin', origin || '*');
+    res.header('Vary', 'Origin');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  }
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
@@ -570,6 +618,15 @@ app.use(compression({
   threshold: 512, // compress even small responses
   brotli: { enabled: true, quality: 5 }, // brotli preferred by modern browsers
 }));
+
+// Health check — lets you / a load balancer verify the server is alive.
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    uptime: process.uptime(),
+    mongo: accountsCollection ? 'connected' : 'disconnected',
+  });
+});
 
 // API endpoints for account management (must be before static files)
 app.post('/api/register', async (req, res) => {
@@ -866,8 +923,9 @@ app.get('/api/leaderboard', async (req, res) => {
   }
 });
 
-// Static file serving with proper caching headers (must be after API routes)
-app.use(express.static('dist', {
+// ── Static file serving (must be after API routes) ─────────────────────────────
+// 1) The built Vite frontend: npm run build → ./dist (index.html, hashed assets).
+app.use(express.static(DIST_DIR, {
   maxAge: '1y', // Cache for 1 year for hashed assets
   etag: true,
   lastModified: true,
@@ -883,7 +941,30 @@ app.use(express.static('dist', {
   }
 }));
 
-app.use(express.static('.', {
+// 2) Game model folders at the repository root (GLB/FBX models, emote clips,
+//    textures — referenced by the client with leading "/", e.g. "/emote
+//    animations/victory dance (100 total kills).glb"). These URLs contain
+//    spaces, which browsers send URL-encoded (%20); Express route mounts do
+//    not match encoded spaces, so the project root is mounted directly and
+//    EVERYTHING private is explicitly blocked before it. Only files that exist
+//    on disk can ever be served, and the blocklist keeps sources/configs out.
+const PRIVATE_ROOT_PATHS = [
+  '/node_modules', '/server', '/public', '/dist',         // code + build dirs
+  '/package.json', '/package-lock.json', '/vite.config.js', // config files
+  '/render.yaml', '/index.html', '/firebase-rules.json', // platform/dev files
+  '/DEPLOYMENT.md', '/NETLIFY_DEPLOYMENT.md', '/VM_DEPLOYMENT.md',
+];
+
+app.use((req, res, next) => {
+  const p = req.path.toLowerCase();
+  if (p.startsWith('/.')) return res.status(404).end(); // all dotfiles: .env, .git, ...
+  if (PRIVATE_ROOT_PATHS.includes(p) || PRIVATE_ROOT_PATHS.some(b => p.startsWith(b + '/'))) {
+    return res.status(404).end();
+  }
+  next();
+});
+
+app.use(express.static(ROOT, {
   maxAge: '30d', // Longer cache for heavy binary assets (they never change at runtime)
   etag: true,
   lastModified: true,
@@ -895,12 +976,23 @@ app.use(express.static('.', {
     if (['fbx', 'glb', 'gltf', 'bin', 'ktx2', 'drc'].includes(ext)) {
       res.setHeader('Cache-Control', 'public, max-age=2592000');
     }
-    // Text assets at the repo root (JSON, fonts) can be compressed + cached
-    if (['json', 'css', 'js', 'txt'].includes(ext)) {
-      res.setHeader('Cache-Control', 'public, max-age=604800');
-    }
   }
 }));
+
+// 3) SPA fallback: any other GET that looks like a client-side route loads the
+//    built index.html. Paths that look like real files (have an extension) and
+//    private/internal locations are left untouched so they 404 instead of
+//    returning the app shell. API and Socket.IO paths are never rewritten.
+app.use((req, res, next) => {
+  if (req.method !== 'GET' || req.path.startsWith('/api/') || req.path.startsWith('/socket.io/')) return next();
+  const p = req.path;
+  const looksLikeFile = extname(p) !== ''; // .js, .json, .env, .png, ...
+  const isPrivate = p.startsWith('/.') || p.startsWith('/node_modules') || p.startsWith('/server') ||
+                    p.startsWith('/public') || p.startsWith('/dist');
+  if (looksLikeFile || isPrivate) return next(); // falls through to a clean 404
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(join(DIST_DIR, 'index.html'));
+});
 
 io.on('connection', async (socket) => {
   const token = socket.handshake.auth.token;
@@ -1449,8 +1541,35 @@ setInterval(() => {
   }
 }, TICK_MS);
 
-http.listen(PORT, () => {
-  console.log(`Test server → http://localhost:${PORT}`);
+// Listen on all interfaces (0.0.0.0) so a reverse proxy can reach the app.
+// The port stays configurable via env (default 3001) — the app never binds :80
+// directly; Nginx (or similar) terminates HTTPS and proxies to this port.
+http.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[FATAL] Cannot start server: port ${PORT} is already in use.`);
+    console.error('        Stop the other process, or set a different PORT in .env');
+  } else if (err.code === 'EACCES') {
+    console.error(`[FATAL] Cannot start server: permission denied binding to ${HOST}:${PORT}.`);
+  } else {
+    console.error('[FATAL] HTTP server error:', err.message || err);
+  }
+  process.exit(1);
+});
+
+http.listen(PORT, HOST, () => {
+  console.log(`------------------------------------------------------------`);
+  console.log(`  Server listening on http://${HOST}:${PORT}`);
+  console.log(`  Frontend    ${join(DIST_DIR, 'index.html')}`);
+  console.log(`  API         /api/*   (login, register, me, emotes, leaderboard)`);
+  console.log(`  Health      /health`);
+  console.log(`  Socket.IO   /socket.io/`);
+  if (!existsSync(join(DIST_DIR, 'index.html'))) {
+    console.log(`------------------------------------------------------------`);
+    console.warn('[WARNING] dist/index.html was NOT found.');
+    console.warn('          The API and Socket.IO still work, but the game frontend');
+    console.warn('          won\'t load - run "npm run build" and restart.');
+  }
+  console.log(`------------------------------------------------------------`);
 });
 
 // ── Live leaderboard broadcast ─────────────────────────────────────────────────

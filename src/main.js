@@ -38,7 +38,12 @@ import {
 } from './firebase-config.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
-const SERVER_URL = "https://fps-multiplayer-game.onrender.com";
+// Production: the frontend and backend are served from the SAME origin (Express
+// serves the built frontend on the VM), so the browser automatically talks to
+// whatever host served the page — no hardcoded server URL.
+// Development: the Vite dev server runs on a different port, so override it
+// with VITE_SERVER_URL (e.g. http://localhost:3001) in your local .env.
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || window.location.origin;
 const TICK_RATE   = 18; // Reduced from 20 to 18 for bandwidth optimization
 const EYE_HEIGHT  = 1.65;
 

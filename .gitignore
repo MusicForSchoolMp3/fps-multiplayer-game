@@ -1,11 +1,20 @@
 # Dependencies
 node_modules/
 
-# Environment variables
+# Environment variables (never commit real credentials)
 .env
+.env.*
+!.env.example
 
 # Build output
 dist/
+
+# Local development database / stray test data (contains plaintext passwords)
+server/accounts.json
+
+# Logs
+*.log
+npm-debug.log*
 
 # IDE
 .vscode/
