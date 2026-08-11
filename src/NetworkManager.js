@@ -40,6 +40,7 @@ export class NetworkManager {
     this.onPlayerEmoteStop = null; // (id) => {}
     this.onDuplicateLogin = null; // (message) => {}
     this.onAnticheatKick = null; // (data) => {}
+    this.onAmmoUpdate = null; // (data) => { weapon, ammo } - server-authoritative magazine
     this.onLeaderboardUpdate = null; // (standings) => {}
 
     this._setupEvents();
@@ -167,6 +168,13 @@ export class NetworkManager {
 
     this.socket.on('health_update', (data) => {
       if (this.onHealthSync) this.onHealthSync(data.id, data.health);
+    });
+
+    // Server-authoritative magazine count. Editing weapon.ammo in devtools is
+    // cosmetic: the HUD gets corrected to the server's count after every shot,
+    // reload and weapon switch.
+    this.socket.on('ammo_update', (data) => {
+      if (this.onAmmoUpdate) this.onAmmoUpdate(data);
     });
 
     this.socket.on('chat_message', (data) => {

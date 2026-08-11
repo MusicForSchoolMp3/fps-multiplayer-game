@@ -57,6 +57,7 @@ export class WeaponSystem {
     // Animation event callbacks — set these from outside (e.g. main.js)
     this.onShoot  = null; // () => void — called each time a bullet is fired
     this.onReload = null; // () => void — called when a reload begins
+    this.onZoom   = null; // (scoped:boolean) => void — sniper scope fully engaged/released
 
     // Zoom state
     this.isZoomed = false;
@@ -243,6 +244,14 @@ export class WeaponSystem {
       } else {
         vignette.classList.remove('active');
       }
+    }
+
+    // Notify when the scope fully engages / disengages (main.js uses this to
+    // hide the local third-person character while scoped).
+    const scoped = this.currentWeapon === 'sniper' && this.zoomProgress > 0.9;
+    if (this.isZoomed !== scoped) {
+      this.isZoomed = scoped;
+      if (this.onZoom) this.onZoom(scoped);
     }
 
     // Decay tracers

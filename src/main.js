@@ -172,6 +172,7 @@ let localBodyAvatar   = null; // full body for third-person view
 let localAnimState    = { time: 0, speed: 0, isGrounded: true, pitch: 0, velocityY: 0 };
 let isThirdPerson     = false;
 let emotePovOverride  = null; // POV saved while an emote forces third-person view
+let thirdPersonScoped = false; // sniper fully scoped while in third person (local body hidden)
 let isDead            = false;
 let localHealth       = 100;
 let localColorIdx     = 0;
@@ -855,6 +856,13 @@ async function startGame() {
   weapon.remotePlayers = remotePlayers;
   weapon.setMapMeshes(mapMeshes);
   applyEquippedSkins();
+
+  // While scoped in third person the FOV is so tight the character would fill
+  // the whole screen — hide it (client-side only; other players still see it).
+  weapon.onZoom = (scoped) => {
+    thirdPersonScoped = scoped;
+    updateLocalBodyVisibility();
+  };
 
   // ── Hook weapon events into the body-avatar animation system ─────────────
   weapon.onShoot  = () => { localAnimState.triggerShoot  = true; };
@@ -1549,7 +1557,7 @@ function applyThirdPerson(enabled) {
 
   // Local body only visible in third-person
   if (localBodyAvatar) {
-    localBodyAvatar.root.visible = isThirdPerson;
+    updateLocalBodyVisibility();
     // Ensure weapon is visible when body is visible
     if (isThirdPerson) {
       localBodyAvatar.root.traverse((obj) => {
@@ -1565,6 +1573,14 @@ function applyThirdPerson(enabled) {
   if (ch) ch.style.opacity = isThirdPerson ? '0.4' : '1';
 
   viewIndicator.textContent = isThirdPerson ? '3RD PERSON' : '1ST PERSON';
+}
+
+// Single source of truth for the local body's visibility. The body is hidden
+// while dead, while in first person, and while scoped in third person (the
+// scope FOV is so tight the character would block the whole view).
+function updateLocalBodyVisibility() {
+  if (!localBodyAvatar) return;
+  localBodyAvatar.root.visible = !isDead && isThirdPerson && !thirdPersonScoped;
 }
 
 // ── Ensure local body avatar exists (created lazily on first TP) ───────────────
@@ -1659,7 +1675,7 @@ function setupNetworkCallbacks() {
       isDead = true;
       if (emoteManager) emoteManager.stop(); // death instantly cancels emotes
       controller.die();
-      if (localBodyAvatar) localBodyAvatar.root.visible = false;
+      updateLocalBodyVisibility();
       deathOverlay.style.display = 'flex';
       // Show killer name
       const killerNameEl = document.getElementById('killer-name');
@@ -1694,7 +1710,7 @@ function setupNetworkCallbacks() {
       localHealth = 100;
       controller.respawn({ x: data.x, y: data.y, z: data.z });
       deathOverlay.style.display = 'none';
-      if (localBodyAvatar && isThirdPerson) localBodyAvatar.root.visible = true;
+      updateLocalBodyVisibility();
       updateHealthUI();
       // Refill ammo on respawn
       if (weapon) weapon.refillAmmo();
@@ -1710,6 +1726,19 @@ function setupNetworkCallbacks() {
 
   net.onHealthSync = (id, health) => {
     if (id === net.localId) { localHealth = health; updateHealthUI(); }
+  };
+
+  // Server-authoritative magazine: corrects the HUD and persisted per-weapon
+  // state after every accepted shot / reload / switch. A devtools ammo edit is
+  // cosmetic and gets overwritten here.
+  net.onAmmoUpdate = (data) => {
+    if (!weapon || !data || !data.weapon) return;
+    if (!weapon.weaponStates[data.weapon]) weapon.weaponStates[data.weapon] = { ammo: 0, reserve: 0 };
+    weapon.weaponStates[data.weapon].ammo = data.ammo;
+    if (data.weapon === weapon.currentWeapon) {
+      weapon.ammo = data.ammo;
+      weapon._updateUI();
+    }
   };
 
   net.onPlayerWeaponChange = (id, weapon) => {
@@ -2017,7 +2046,19 @@ function gameLoop() {
     const camZ = target.z + dist * Math.cos(pitch) * Math.cos(controller.swivel);
 
     camera.position.set(camX, camY, camZ);
-    camera.lookAt(target);
+
+    // Look AT the aim point (AIM_DIST units in front of the character along
+    // its gun line) instead of at the chest. The crosshair is the screen
+    // center, and shots are raycast through the screen center, so this makes
+    // the crosshair track the character's aim and bullets land exactly on it.
+    const aimPitch = controller.lean + controller.recoilPitch;
+    const aimCos = Math.cos(aimPitch);
+    const AIM_DIST = 10;
+    camera.lookAt(
+      controller.location.x - Math.sin(controller.swivel) * aimCos * AIM_DIST,
+      controller.location.y + Math.sin(aimPitch) * AIM_DIST,
+      controller.location.z - Math.cos(controller.swivel) * aimCos * AIM_DIST
+    );
   }
 
   // ── Send movement ─────────────────────────────────────────────────────────

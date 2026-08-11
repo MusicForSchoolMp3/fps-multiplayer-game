@@ -42,6 +42,10 @@ const HOST = process.env.HOST || '0.0.0.0';
 const TICK_MS = 1000 / 18; // Reduced from 30Hz to 18Hz for bandwidth optimization
 const MAX_HP = 100;
 const RESPAWN_S = 3;
+// Eye height above feet. The client sends EYE positions in move packets and the
+// server stores p.py as an EYE position, so spawn/respawn must write feet+EYE
+// or remote clients render the player buried under the floor (py-1.65 < 0).
+const EYE_HEIGHT = 1.65;
 
 // Interest management: only replicate players within this horizontal radius.
 // The 200x200 map has a corner-to-corner distance of ~283, so this must cover
@@ -482,7 +486,7 @@ function createPlayer(socket, username) {
     username: username,
     name: username,
     colorIndex: (colorCounter++) % COLORS.length,
-    px: spawn.x, py: spawn.y, pz: spawn.z,
+    px: spawn.x, py: spawn.y + EYE_HEIGHT, pz: spawn.z,
     ry: 0, rp: 0, gait: 0,
     docked: true,
     ascend: 0,
@@ -506,10 +510,19 @@ function createPlayer(socket, username) {
     lastReloadWeapon: 'ar', // which weapon the last reload_start belonged to
     isReloading: false,
     reloadStartTime: 0,
+    // ── Server-authoritative ammo ──────────────────────────────────────────────
+    // The magazine is tracked ONLY here. Editing weapon.ammo / addAmmo() in
+    // devtools (or tampering with the localStorage weaponStates) cannot refill
+    // these — every shot decrements the server copy and firing on an empty
+    // server magazine is rejected and logged. A legitimate reload_complete is
+    // the only way to refill. ammoByWeapon preserves per-gun magazines across
+    // weapon switches exactly like the client does.
+    ammoByWeapon: { ar: WEAPONS.ar.maxAmmo, sniper: WEAPONS.sniper.maxAmmo },
+    ammo: WEAPONS.ar.maxAmmo, // current weapon's server magazine copy
     // Server-side teleport tracking (previous accepted position + timestamp)
     // _lastMoveAt starts at -1: the FIRST move packet only establishes the
     // baseline (the client's local origin may differ from the assigned spawn).
-    _lastMoveX: spawn.x, _lastMoveY: spawn.y, _lastMoveZ: spawn.z,
+    _lastMoveX: spawn.x, _lastMoveY: spawn.y + EYE_HEIGHT, _lastMoveZ: spawn.z,
     _lastMoveAt: -1,
     _teleportWarnings: 0,
     // Integrity challenge state
@@ -518,7 +531,7 @@ function createPlayer(socket, username) {
     integrity: { pending: new Map(), failed: 0 },
     // Previous state for delta compression
     _prev: {
-      px: spawn.x, py: spawn.y, pz: spawn.z,
+      px: spawn.x, py: spawn.y + EYE_HEIGHT, pz: spawn.z,
       ry: 0, rp: 0, gait: 0,
       docked: true,
       ascend: 0,
@@ -1520,6 +1533,28 @@ io.on('connection', async (socket) => {
     
     // Anticheat: Fire rate validation (with network latency tolerance)
     const now = Date.now();
+
+    // ── Server-authoritative ammo ────────────────────────────────────────────
+    // A shot is only accepted if the SERVER's copy of the magazine still has
+    // rounds. A devtools edit (weapon.ammo = 9999 / addAmmo) changes nothing:
+    // every accepted shot decrements this counter, and once it hits zero every
+    // further shot is rejected and strikes the account. The reload protocol
+    // (reload_start/reload_complete, time-validated) is the only way to refill.
+    if (shooter.ammo <= 0) {
+      shooter.infractionTally++;
+      shooter.infractionMoment = now;
+      console.log(`[Anticheat] Shot with empty magazine for ${shooter.username}: server ammo is 0 (Warning ${shooter.infractionTally}/${INFRACTION_CAP})`);
+      socket.emit('ammo_update', { weapon: shooter.currentWeapon, ammo: 0 });
+      if (shooter.infractionTally >= INFRACTION_CAP) {
+        disqualifyNow(socket, shooter, 'Infinite ammo hacking detected');
+        return;
+      }
+      return; // shot rejected - no damage, no broadcast
+    }
+    shooter.ammo--;
+    shooter.ammoByWeapon[shooter.currentWeapon] = shooter.ammo;
+    socket.emit('ammo_update', { weapon: shooter.currentWeapon, ammo: shooter.ammo });
+
     const timeSinceLastShot = now - shooter.lastShotTime;
     const minFireRate = weaponConfig.fireRate * 1000; // Convert to milliseconds
     const latencyTolerance = 100; // 100ms tolerance for network latency
@@ -1684,6 +1719,12 @@ io.on('connection', async (socket) => {
     const now = Date.now();
     p.lastReloadTime = now;
     p.lastShotTime = now;
+
+    // Sync the server magazine to the weapon being switched to (per-gun
+    // magazines are preserved server-side, matching the client weaponStates).
+    const nextConfig = WEAPONS[p.currentWeapon] || WEAPONS.ar;
+    p.ammo = p.ammoByWeapon[p.currentWeapon] ?? nextConfig.maxAmmo;
+    socket.emit('ammo_update', { weapon: p.currentWeapon, ammo: p.ammo });
     
     // Broadcast to other players
     socket.broadcast.emit('player_weapon_change', {
@@ -1771,6 +1812,12 @@ io.on('connection', async (socket) => {
     
     // Update reload state
     p.isReloading = false;
+
+    // Refill the SERVER magazine. This is the only code path that ever
+    // increases ammo - infinite-ammo devtools edits cannot touch it.
+    p.ammo = weaponConfig.maxAmmo;
+    p.ammoByWeapon[p.currentWeapon] = p.ammo;
+    socket.emit('ammo_update', { weapon: p.currentWeapon, ammo: p.ammo });
   });
 
   socket.on('disconnect', () => {
@@ -1849,7 +1896,10 @@ async function killPlayer(victimId, killerId) {
     if (!p) return;
     const s = nextSpawn();
     const now = Date.now();
-    p.px = s.x; p.py = s.y; p.pz = s.z;
+    // py is an EYE position (move packets carry location.y). Writing s.y here
+    // made respawned players render UNDER the map on everyone's screen until
+    // their next move packet lifted them back up.
+    p.px = s.x; p.py = s.y + EYE_HEIGHT; p.pz = s.z;
     p.health = MAX_HP;
     p.isDead = false;
     // Reset weapon anticheat tracking on respawn
@@ -1858,11 +1908,15 @@ async function killPlayer(victimId, killerId) {
     p.lastShotTime = now;
     p.lastReloadTime = now;
     p.lastReloadWeapon = p.currentWeapon;
+    // Refill both server magazines (client refills locally on respawn too)
+    p.ammoByWeapon = { ar: WEAPONS.ar.maxAmmo, sniper: WEAPONS.sniper.maxAmmo };
+    p.ammo = p.ammoByWeapon[p.currentWeapon];
+    io.to(victimId).emit('ammo_update', { weapon: p.currentWeapon, ammo: p.ammo });
     // Emote state must not survive death/respawn
     p.currentEmote = null;
     // Reset the teleport baseline: the client respawns at the new spawn point,
     // so the next 'move' must not be flagged as a teleport.
-    p._lastMoveX = s.x; p._lastMoveY = s.y; p._lastMoveZ = s.z;
+    p._lastMoveX = s.x; p._lastMoveY = s.y + EYE_HEIGHT; p._lastMoveZ = s.z;
     p._lastMoveAt = -1;
     p._teleportWarnings = 0;
     io.emit('player_respawn', { id: victimId, ...s });
