@@ -78,7 +78,37 @@ export function setEquippedSkin(weaponType, skinId) {
   localStorage.setItem(`equipped_skin_${weaponType}`, skinId);
 }
 
+// Restore the server-authoritative equipped look (from login / /api/me).
+export function syncEquippedSkins(map) {
+  if (!map || typeof map !== 'object') return;
+  if (map.ar) setEquippedSkin('ar', map.ar);
+  if (map.sniper) setEquippedSkin('sniper', map.sniper);
+}
+
+// Equip a skin THROUGH THE SERVER. The server validates ownership (including
+// exclusive skins like sniper_testing, which only 'ben' can ever equip). A
+// hacked client that pretends to be 'ben' in devtools is rejected here because
+// the server only trusts the account behind the JWT.
+export async function equipSkin(weaponType, skinId, token) {
+  const res = await fetch(`${import.meta.env.VITE_SERVER_URL || window.location.origin}/api/skins/equip`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify({ weapon: weaponType, skinId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to equip skin');
+  }
+  setEquippedSkin(weaponType, data.skinId || skinId);
+  return data;
+}
+
 // Check if a user has access to an exclusive skin
+// NOTE: this is only for UI rendering hints. The REAL gate is the server's
+// /api/skins/equip endpoint, which checks the JWT's actual account.
 export function hasSkinAccess(skinId, username) {
   const skin = Object.values(SKINS_CONFIG).flat().find(s => s.id === skinId);
   if (!skin || !skin.exclusive) return true; // Non-exclusive skins are available to everyone

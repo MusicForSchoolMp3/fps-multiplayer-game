@@ -10,6 +10,7 @@ import jwt from 'jsonwebtoken';
 import { fileURLToPath } from 'url';
 import { dirname, join, extname } from 'path';
 import { readdirSync, existsSync } from 'fs';
+import { randomBytes } from 'crypto';
 import 'dotenv/config';
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -130,6 +131,46 @@ console.log(`[Emotes] Detected ${EMOTES.length} emote(s): ${EMOTES.map(e => `${e
 const PACE_LIMIT = 15.0; // Maximum allowed pace (units/sec)
 const INFRACTION_CAP = 3; // Number of warnings before kick
 const SENTENCE_MILLIS = 300000; // 5 minutes in milliseconds
+
+// ── Server-side position (teleport) validation ─────────────────────────────────
+// The server NEVER trusts client coordinates: every 'move' packet is compared
+// against the player's previously accepted position. Any jump larger than what
+// the game's own physics could produce within the elapsed time is a teleport.
+const MAX_TRAVEL_SPEED = 24.0; // u/s — sprint is 9, jumps/falls peak ~22; margin for latency
+const TELEPORT_GRACE = 3.0;    // u — fixed slack for network batching/jitter
+const OUT_OF_BOUNDS = 110.0;   // anything outside ±99 walls is always a teleport attempt
+const MAX_ALTITUDE = 200.0;    // above this is never a real game height
+
+// ── Server-authoritative integrity challenge ────────────────────────────────────
+// Every client must answer a deterministic challenge on a timer. The answer
+// function lives on BOTH ends (client mirror in src/IntegrityGuard.js). If the
+// client code was edited/overridden in devtools, or JS was disabled (no answer
+// arrives), the server kicks the player and records a strike in MongoDB.
+const INTEGRITY_SALT = 'fps-game-int3gr1ty-v1-xk91';
+const INTEGRITY_BUCKET_MS = 5000; // answers are stable within this window
+const INTEGRITY_CHALLENGE_MS = 8000; // how often a new challenge is issued
+const INTEGRITY_TIMEOUT_MS = 20000; // unanswered challenge counts as failure
+const INTEGRITY_FAIL_LIMIT = 2; // failures before kick + strike
+
+function computeIntegrityAnswer(nonce, t) {
+  const s = `${INTEGRITY_SALT}|${nonce}|${Math.floor(Number(t) / INTEGRITY_BUCKET_MS)}`;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return `${(h >>> 0).toString(16)}-${(h >>> 13).toString(16)}-${s.length.toString(16)}`;
+}
+
+// ── Server-side skin registry (authoritative) ──────────────────────────────────
+// The client may render whatever it wants locally, but equipping is validated
+// here. 'sniper_testing' is exclusive to the 'ben' account — nobody else can
+// ever equip it, no matter what they type into devtools.
+const SKIN_REGISTRY = {
+  ar: new Set(['ar_default', 'ar_custom_slot1']),
+  sniper: new Set(['sniper_testing', 'sniper_midnight', 'sniper_default', 'sniper_custom_slot1']),
+};
+const EXCLUSIVE_SKINS = { sniper_testing: ['ben'] };
 
 // ── Leaderboard helpers ────────────────────────────────────────────────────────
 // Testing blacklist: these accounts are locked out of the game.
@@ -342,6 +383,54 @@ async function connectToMongo() {
       console.error('Emote migration error:', emoteMigrationError);
     }
 
+    // Migration: exclusive skin ownership — the "testing skin" (sniper_testing)
+    // is ONLY ever granted to the 'ben' account. If anyone else ever got it
+    // (previous client-side abuse), it is stripped from them here.
+    try {
+      const benResult = await accountsCollection.updateOne(
+        { username: 'ben' },
+        { $addToSet: { skins: 'sniper_testing' } }
+      );
+      console.log(`Skin migration: ben matched ${benResult.matchedCount}, modified ${benResult.modifiedCount} (sniper_testing granted)`);
+      const stripResult = await accountsCollection.updateMany(
+        { username: { $ne: 'ben' }, skins: 'sniper_testing' },
+        { $pull: { skins: 'sniper_testing' } }
+      );
+      console.log(`Skin migration: stripped sniper_testing from ${stripResult.modifiedCount} non-ben account(s)`);
+    } catch (skinMigrationError) {
+      console.error('Skin migration error:', skinMigrationError);
+    }
+
+    // Migration: equippedSkins (server-authoritative equipped look).
+    try {
+      const withoutEquippedSkins = await accountsCollection.countDocuments({ equippedSkins: { $exists: false } });
+      if (withoutEquippedSkins > 0) {
+        const result = await accountsCollection.updateMany(
+          { equippedSkins: { $exists: false } },
+          { $set: { equippedSkins: { ar: 'ar_default', sniper: 'sniper_midnight' } } }
+        );
+        console.log(`Equipped-skin migration: matched ${result.matchedCount}, modified ${result.modifiedCount} accounts`);
+      } else {
+        console.log('All accounts already have equippedSkins field');
+      }
+    } catch (equippedSkinMigrationError) {
+      console.error('Equipped-skin migration error:', equippedSkinMigrationError);
+    }
+
+    // Migration: anticheat strike fields (kick-without-ban strike log).
+    try {
+      const withoutStrikes = await accountsCollection.countDocuments({ anticheatStrikes: { $exists: false } });
+      if (withoutStrikes > 0) {
+        const result = await accountsCollection.updateMany(
+          { anticheatStrikes: { $exists: false } },
+          { $set: { anticheatStrikes: 0, anticheatStrikeLog: [] } }
+        );
+        console.log(`Anticheat strike migration: matched ${result.matchedCount}, modified ${result.modifiedCount} accounts`);
+      }
+    } catch (strikeMigrationError) {
+      console.error('Anticheat strike migration error:', strikeMigrationError);
+    }
+
     // Load every account's kills into the live leaderboard index.
     await loadLiveLeaderboard();
   } catch (error) {
@@ -417,6 +506,16 @@ function createPlayer(socket, username) {
     lastReloadWeapon: 'ar', // which weapon the last reload_start belonged to
     isReloading: false,
     reloadStartTime: 0,
+    // Server-side teleport tracking (previous accepted position + timestamp)
+    // _lastMoveAt starts at -1: the FIRST move packet only establishes the
+    // baseline (the client's local origin may differ from the assigned spawn).
+    _lastMoveX: spawn.x, _lastMoveY: spawn.y, _lastMoveZ: spawn.z,
+    _lastMoveAt: -1,
+    _teleportWarnings: 0,
+    // Integrity challenge state
+    _integrityTimer: null,
+    _integrityWatchdog: null,
+    integrity: { pending: new Map(), failed: 0 },
     // Previous state for delta compression
     _prev: {
       px: spawn.x, py: spawn.y, pz: spawn.z,
@@ -506,6 +605,48 @@ async function disqualifyNow(socket, player, reason) {
   socket.disconnect();
   
   // Notify other players
+  socket.broadcast.emit('player_leave', socket.id);
+}
+
+// Anticheat: kick a player WITHOUT banning them (no cooldown), but record a
+// permanent strike + reason on their MongoDB account so it can be reviewed.
+// Used for teleporting and code/devtools tampering, per the requested policy.
+async function strikeAndKick(socket, player, reason) {
+  console.log(`[Anticheat] Striking ${player.username} for: ${reason}`);
+
+  socket.emit('anticheat_kick', {
+    reason: reason,
+    duration: 0,
+    expiry: new Date().toISOString(),
+    strike: true,
+  });
+
+  if (accountsCollection) {
+    try {
+      await accountsCollection.updateOne(
+        { username: player.username },
+        {
+          $inc: { anticheatWarnings: 1, anticheatStrikes: 1 },
+          $set: {
+            lastAnticheatWarning: new Date(),
+            lastAnticheatReason: reason,
+          },
+          $push: {
+            anticheatStrikeLog: {
+              $each: [{ reason, at: new Date() }],
+              $slice: -100, // keep the last 100 strikes
+            },
+          },
+        }
+      );
+      console.log(`[Anticheat] Strike recorded in MongoDB for ${player.username}: ${reason}`);
+    } catch (error) {
+      console.error(`[Anticheat] Failed to record strike: ${error}`);
+    }
+  }
+
+  players.delete(socket.id);
+  socket.disconnect();
   socket.broadcast.emit('player_leave', socket.id);
 }
 
@@ -683,6 +824,7 @@ app.post('/api/register', async (req, res) => {
       monthKey: currentMonthKey(),
       monthKills: 0,
       skins: ['ar_default', 'sniper_midnight'], // Default skins
+      equippedSkins: { ar: 'ar_default', sniper: 'sniper_midnight' },
       unlockedEmotes: DEFAULT_EMOTE_ID ? [DEFAULT_EMOTE_ID] : [], // New accounts start with the cheapest emote
       equippedEmotes: defaultWheel(),
       createdAt: new Date(),
@@ -742,6 +884,7 @@ app.post('/api/login', async (req, res) => {
       username: account.username,
       totalKills: account.totalKills || 0,
       skins: account.skins || ['ar_default', 'sniper_midnight'],
+      equippedSkins: account.equippedSkins || { ar: 'ar_default', sniper: 'sniper_midnight' },
       unlockedEmotes: account.unlockedEmotes || [],
       equippedEmotes: Array.isArray(account.equippedEmotes) ? account.equippedEmotes : defaultWheel(),
       token
@@ -774,6 +917,7 @@ app.get('/api/me', async (req, res) => {
       username: account.username,
       totalKills: account.totalKills || 0,
       skins: account.skins || ['ar_default', 'sniper_midnight'],
+      equippedSkins: account.equippedSkins || { ar: 'ar_default', sniper: 'sniper_midnight' },
       unlockedEmotes: account.unlockedEmotes || [],
       equippedEmotes: Array.isArray(account.equippedEmotes) ? account.equippedEmotes : defaultWheel()
     });
@@ -822,6 +966,57 @@ app.post('/api/validate-skin', async (req, res) => {
     }
     console.error('Validate skin error:', error);
     res.status(500).json({ error: 'Failed to validate skin' });
+  }
+});
+
+// Equip a skin — SERVER-AUTHORITATIVE. The client's local state is irrelevant;
+// this endpoint decides what a player may actually use. Exclusive skins (e.g.
+// sniper_testing) are locked to their owner account ('ben') regardless of what
+// username a modified client pretends to be.
+app.post('/api/skins/equip', async (req, res) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  const { weapon, skinId } = req.body || {};
+
+  if (!token) return res.status(401).json({ error: 'Missing token' });
+  if (!weapon || !skinId) return res.status(400).json({ error: 'Missing weapon or skinId' });
+
+  const VALID_WEAPONS = ['ar', 'sniper'];
+  if (!VALID_WEAPONS.includes(weapon)) return res.status(400).json({ error: 'Invalid weapon' });
+  if (!SKIN_REGISTRY[weapon] || !SKIN_REGISTRY[weapon].has(skinId)) {
+    return res.status(404).json({ error: 'Skin not found' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (!accountsCollection) return res.status(500).json({ error: 'Database not available' });
+
+    const account = await accountsCollection.findOne({ username: decoded.username });
+    if (!account) return res.status(401).json({ error: 'Account not found' });
+
+    // Exclusive-skin gate: even if a hacked client claims to be 'ben', the
+    // server only trusts the account the JWT actually belongs to.
+    const exclusiveTo = EXCLUSIVE_SKINS[skinId];
+    if (exclusiveTo && !exclusiveTo.includes(account.username)) {
+      return res.status(403).json({ error: 'This skin is exclusive to another account' });
+    }
+
+    const owned = account.skins || ['ar_default', 'sniper_midnight'];
+    if (!owned.includes(skinId)) {
+      return res.status(403).json({ error: 'You do not own this skin' });
+    }
+
+    const equippedSkins = { ...(account.equippedSkins || { ar: 'ar_default', sniper: 'sniper_midnight' }), [weapon]: skinId };
+    await accountsCollection.updateOne(
+      { username: account.username },
+      { $set: { [`equippedSkins.${weapon}`]: skinId } }
+    );
+
+    res.json({ success: true, weapon, skinId, equippedSkins });
+  } catch (error) {
+    if (error.name === 'JsonWebTokenError') return res.status(401).json({ error: 'Invalid token' });
+    if (error.name === 'TokenExpiredError') return res.status(401).json({ error: 'Token expired' });
+    console.error('Equip skin error:', error);
+    res.status(500).json({ error: 'Failed to equip skin' });
   }
 });
 
@@ -1015,6 +1210,52 @@ app.use((req, res, next) => {
   res.sendFile(join(DIST_DIR, 'index.html'));
 });
 
+// ── Server-authoritative integrity heartbeat ────────────────────────────────────
+// A challenge is sent to the client every INTEGRITY_CHALLENGE_MS; the client
+// must reply with the deterministic answer. Missing, late or wrong answers mean
+// the client's code was tampered with (devtools edits / overrides) or JS was
+// disabled — in every case the server kicks and strikes the account. All of the
+// enforcement lives HERE on the server; the client can never turn it off.
+function startIntegrityWatch(socket, player) {
+  player.integrity.pending.clear();
+  player.integrity.failed = 0;
+
+  player._integrityTimer = setInterval(() => {
+    if (!socket.connected || !players.has(socket.id)) return;
+    const nonce = randomBytes(16).toString('hex');
+    const issuedAt = Date.now();
+    player.integrity.pending.set(nonce, issuedAt);
+    socket.emit('integrity_challenge', { nonce, t: issuedAt });
+  }, INTEGRITY_CHALLENGE_MS);
+
+  player._integrityWatchdog = setInterval(() => {
+    if (!players.has(socket.id)) return;
+    const now = Date.now();
+    let timedOut = 0;
+    for (const [nonce, issuedAt] of player.integrity.pending) {
+      if (now - issuedAt > INTEGRITY_TIMEOUT_MS) {
+        player.integrity.pending.delete(nonce);
+        player.integrity.failed++;
+        timedOut++;
+      }
+    }
+    if (timedOut > 0) {
+      console.log(`[Anticheat] Integrity timeout x${timedOut} for ${player.username} (total ${player.integrity.failed}/${INTEGRITY_FAIL_LIMIT})`);
+    }
+    if (player.integrity.failed >= INTEGRITY_FAIL_LIMIT) {
+      strikeAndKick(socket, player, 'Systems detected you attempting to tamper with the game (developer tools / modified code)');
+    }
+  }, 5000);
+}
+
+function stopIntegrityWatch(player) {
+  if (player._integrityTimer) clearInterval(player._integrityTimer);
+  if (player._integrityWatchdog) clearInterval(player._integrityWatchdog);
+  player._integrityTimer = null;
+  player._integrityWatchdog = null;
+  if (player.integrity) player.integrity.pending.clear();
+}
+
 io.on('connection', async (socket) => {
   const token = socket.handshake.auth.token;
   let username = null;
@@ -1098,6 +1339,11 @@ io.on('connection', async (socket) => {
   players.set(socket.id, player);
   console.log(`[+] ${player.username} connected (${socket.id})`);
 
+  // Server-authoritative integrity heartbeat begins immediately. If the client
+  // stops answering (JS disabled, code overridden, devtools tampering), the
+  // server kicks + strikes — this cannot be turned off from the client.
+  startIntegrityWatch(socket, player);
+
   const existing = {};
   for (const [id, p] of players) {
     if (id !== socket.id) existing[id] = sanitize(p);
@@ -1162,10 +1408,61 @@ io.on('connection', async (socket) => {
         return;
       }
     }
-    
-    p.px = clamp(snap.px, -99, 99);
-    p.py = Math.max(0, snap.py);
-    p.pz = clamp(snap.pz, -99, 99);
+
+    // ── Anticheat: Server-side teleport detection ──────────────────────────
+    // The reported position is compared against the last ACCEPTED position.
+    // If the displacement exceeds what the game's physics could produce in the
+    // elapsed time (sprint 9 u/s, falls/jumps peak ~22 u/s + grace), the client
+    // is teleporting (e.g. by hijacking the gun's raycast to move the player).
+    // This is fully server-side: client edits cannot disable it.
+    const nowT = Date.now();
+    const rx = Number(snap.px) || 0;
+    const ry = Number(snap.py) || 0;
+    const rz = Number(snap.pz) || 0;
+
+    // Out-of-bounds reports (beyond the ±99 walls / legal height) are always
+    // a teleport attempt — no physics path can ever produce them.
+    const outOfBounds =
+      Math.abs(rx) > OUT_OF_BOUNDS ||
+      Math.abs(rz) > OUT_OF_BOUNDS ||
+      ry > MAX_ALTITUDE ||
+      ry < -50;
+
+    const dx = rx - p._lastMoveX;
+    const dy = ry - p._lastMoveY;
+    const dz = rz - p._lastMoveZ;
+    const moved = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    const elapsedMs = nowT - p._lastMoveAt;
+    // Idle players stop sending moves; if they teleport after standing still,
+    // never allow more than 500ms worth of "free" travel — a real teleport
+    // across the map can never pass this, while legitimate movement (sprint 9
+    // u/s, falls peak ~22 u/s) always can.
+    const effDt = Math.max(0, Math.min(elapsedMs, 500));
+    const allowedDist = (effDt / 1000) * MAX_TRAVEL_SPEED + TELEPORT_GRACE;
+
+    if (outOfBounds || (p._lastMoveAt !== -1 && moved > allowedDist)) {
+      p._teleportWarnings++;
+      p.infractionTally++;
+      p.infractionMoment = nowT;
+      console.log(
+        `[Anticheat] Teleport violation for ${p.username}: moved ${moved.toFixed(2)}u in ${elapsedMs}ms ` +
+        `(allowed ${allowedDist.toFixed(2)}u, oob=${outOfBounds}) (Warning ${p.infractionTally}/${INFRACTION_CAP})`
+      );
+      if (p.infractionTally >= INFRACTION_CAP) {
+        strikeAndKick(socket, p, 'Systems detected you attempting to teleport');
+        return;
+      }
+    }
+
+    // Accept the position (this becomes the new baseline for the next check).
+    p._lastMoveX = rx;
+    p._lastMoveY = ry;
+    p._lastMoveZ = rz;
+    p._lastMoveAt = nowT;
+
+    p.px = clamp(rx, -99, 99);
+    p.py = Math.max(0, ry);
+    p.pz = clamp(rz, -99, 99);
     p.ry = snap.ry || 0;
     p.rp = clamp(snap.rp || 0, -Math.PI / 2, Math.PI / 2);
     p.gait = Math.abs(snap.gait || 0);
@@ -1279,6 +1576,27 @@ io.on('connection', async (socket) => {
     if (data.hitId && players.has(data.hitId)) {
       const victim = players.get(data.hitId);
       if (victim.isDead) return;
+      if (data.hitId === socket.id) return; // cannot hit yourself
+
+      // Anticheat: range validation — the victim must be within the weapon's
+      // maxRange of the shooter's last accepted position. This stops clients
+      // from forging hitId to shoot players across the map.
+      if (shooter._lastMoveAt !== -1) {
+        const rdx = victim.px - shooter.px;
+        const rdy = victim.py - shooter.py;
+        const rdz = victim.pz - shooter.pz;
+        const rangeLimit = weaponConfig.maxRange + 5;
+        if (rdx * rdx + rdy * rdy + rdz * rdz > rangeLimit * rangeLimit) {
+          shooter.infractionTally++;
+          shooter.infractionMoment = now;
+          console.log(`[Anticheat] Out-of-range hit for ${shooter.username}: victim ${victim.username} is beyond ${weaponConfig.maxRange}u (Warning ${shooter.infractionTally}/${INFRACTION_CAP})`);
+          if (shooter.infractionTally >= INFRACTION_CAP) {
+            disqualifyNow(socket, shooter, 'Range hacking detected');
+            return;
+          }
+          return; // do not apply the hit
+        }
+      }
 
       // Server-side health calculation (prevent client tampering)
       victim.health = Math.max(0, victim.health - serverDamage);
@@ -1299,6 +1617,41 @@ io.on('connection', async (socket) => {
   });
 
   socket.on('ping_req', () => socket.emit('pong_res'));
+
+  // ── Server-authoritative integrity protocol ─────────────────────────────────
+  // The client must answer every challenge with the exact deterministic hash.
+  // Wrong answers (client code overridden/edited in devtools) or no answers
+  // (JS disabled) → kick + strike. All enforcement is here on the server.
+  socket.on('integrity_answer', (data) => {
+    const p = players.get(socket.id);
+    if (!p || !p.integrity) return;
+    const { nonce, t, answer } = data || {};
+    if (!nonce || typeof answer !== 'string') return;
+    if (!p.integrity.pending.has(nonce)) return; // unknown/replayed nonce
+    p.integrity.pending.delete(nonce);
+
+    const expected = computeIntegrityAnswer(nonce, t);
+    if (answer === expected) {
+      p.integrity.failed = Math.max(0, p.integrity.failed - 1); // reward good answers
+      return;
+    }
+    p.integrity.failed++;
+    console.log(`[Anticheat] Integrity answer MISMATCH for ${p.username} (${p.integrity.failed}/${INTEGRITY_FAIL_LIMIT})`);
+    if (p.integrity.failed >= INTEGRITY_FAIL_LIMIT) {
+      strikeAndKick(socket, p, 'Systems detected you attempting to tamper with the game (developer tools / modified code)');
+    }
+  });
+
+  // Client-side tamper detection is best-effort (a modified client can always
+  // suppress it), so this is just an immediate extra signal — the challenge
+  // protocol above is the actual server-enforced backstop.
+  socket.on('integrity_report', (data) => {
+    const p = players.get(socket.id);
+    if (!p) return;
+    const type = (data && data.type) || 'unknown';
+    console.log(`[Anticheat] Integrity report from ${p.username}: ${type}`);
+    strikeAndKick(socket, p, 'Systems detected you attempting to tamper with the game (developer tools / modified code)');
+  });
 
   socket.on('chat_message', (data) => {
     const p = players.get(socket.id);
@@ -1424,6 +1777,7 @@ io.on('connection', async (socket) => {
     if (player.currentEmote) {
       broadcastToNearby('player_emote_stop', { id: socket.id }, player);
     }
+    stopIntegrityWatch(player);
     players.delete(socket.id);
     io.emit('player_leave', socket.id);
     console.log(`[-] ${player.username} disconnected`);
@@ -1506,6 +1860,11 @@ async function killPlayer(victimId, killerId) {
     p.lastReloadWeapon = p.currentWeapon;
     // Emote state must not survive death/respawn
     p.currentEmote = null;
+    // Reset the teleport baseline: the client respawns at the new spawn point,
+    // so the next 'move' must not be flagged as a teleport.
+    p._lastMoveX = s.x; p._lastMoveY = s.y; p._lastMoveZ = s.z;
+    p._lastMoveAt = -1;
+    p._teleportWarnings = 0;
     io.emit('player_respawn', { id: victimId, ...s });
     io.emit('health_update', { id: victimId, health: MAX_HP });
   }, RESPAWN_S * 1000);

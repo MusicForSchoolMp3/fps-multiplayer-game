@@ -316,24 +316,27 @@ export class WeaponSystem {
       dir = this._raycaster.ray.direction.clone();
     }
 
-    // Collect remote player meshes (hit detection)
+    // Collect remote player hitboxes for hit detection. Raycasting the FULL
+    // skinned GLB avatar meshes on every shot was the lag source: SkinnedMesh
+    // raycast applies per-vertex bone transforms on a huge character model, so
+    // the moment a bullet crossed a player's bounding volume the frame rate
+    // tanked. The invisible 1x2x1 box hitboxes (12 triangles) are what actually
+    // represent the player body and are raycast cheaply.
     const targets = [];
-    for (const [id, rp] of this.remotePlayers) {
-      targets.push({ id, mesh: rp.root });
-    }
-    const meshes = targets.map(t => t.mesh);
-    // Also collect all descendant meshes
-    const allMeshes = [];
-    meshes.forEach(m => m.traverse(c => { if (c.isMesh) allMeshes.push(c); }));
-
-    // Build a map mesh -> playerId
     const meshToId = new Map();
-    for (const { id, mesh } of targets) {
-      mesh.traverse(c => { if (c.isMesh) meshToId.set(c, id); });
+    for (const [id, rp] of this.remotePlayers) {
+      const m = rp.hitbox || rp.root;
+      if (!m) continue;
+      targets.push(m);
+      meshToId.set(m, id);
     }
 
-    // Combine player meshes and map object meshes for raycasting
-    const raycastTargets = [...allMeshes, ...this.mapMeshes];
+    // Clamp ray distance to the weapon's range so far-away map geometry and
+    // distant players are never tested.
+    this._raycaster.far = this.maxRange + 1;
+
+    // Combine player hitboxes and map object meshes for raycasting
+    const raycastTargets = [...targets, ...this.mapMeshes];
 
     const hits = this._raycaster.intersectObjects(raycastTargets, false);
 

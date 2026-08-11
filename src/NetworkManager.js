@@ -3,6 +3,7 @@
 
 import { io } from 'socket.io-client';
 import msgpackParser from 'socket.io-msgpack-parser';
+import { IntegrityGuard, computeIntegrityAnswer } from './IntegrityGuard.js';
 
 const INTERP_DELAY = 100; // ms of interpolation buffer
 const MOVE_INTERVAL = 1000 / 18; // 18Hz movement update rate (reduced from 20Hz)
@@ -43,6 +44,16 @@ export class NetworkManager {
 
     this._setupEvents();
 
+    // Tamper/devtools reporting: best-effort early warning to the server. The
+    // server makes the final call (it also verifies every challenge answer and
+    // times out silent clients), so a disabled/suppressed guard changes nothing
+    // from the player's perspective — they just lose the ability to be heard.
+    this._integrity = new IntegrityGuard((hits) => {
+      if (this.socket && this.socket.connected) {
+        this.socket.emit('integrity_report', { type: 'tampering', detail: hits });
+      }
+    });
+
     // Ping pong
     setInterval(() => {
       if (this.connected) {
@@ -55,10 +66,25 @@ export class NetworkManager {
   _setupEvents() {
     this.socket.on('connect', () => {
       this.connected = true;
+      if (this._integrity) this._integrity.start();
     });
 
     this.socket.on('disconnect', () => {
       this.connected = false;
+      if (this._integrity) this._integrity.stop();
+    });
+
+    // Server-authoritative integrity challenge: must be answered with the exact
+    // deterministic hash or the server kicks + strikes the account.
+    this.socket.on('integrity_challenge', (data) => {
+      const nonce = data && data.nonce;
+      if (!nonce) return;
+      const t = Number(data.t) || Date.now();
+      this.socket.emit('integrity_answer', {
+        nonce,
+        t,
+        answer: computeIntegrityAnswer(nonce, t),
+      });
     });
 
     this.socket.on('pong_res', () => {

@@ -26,6 +26,8 @@ import {
   SKINS_CONFIG,
   getEquippedSkin,
   setEquippedSkin,
+  syncEquippedSkins,
+  equipSkin,
   hasSkinAccess,
   getAccessibleSkins,
 } from './SkinManager.js';
@@ -372,6 +374,7 @@ async function checkSession() {
     sessionUsername = data.username;
     sessionTotalKills = data.totalKills || 0;
     ownedSkins = data.skins || ['ar_default', 'sniper_midnight'];
+    syncEquippedSkins(data.equippedSkins); // server-authoritative equipped look
     unlockedEmotes = Array.isArray(data.unlockedEmotes) ? data.unlockedEmotes : [];
     equippedEmotes = Array.isArray(data.equippedEmotes) && data.equippedEmotes.length === 10 ? data.equippedEmotes : Array(10).fill(null);
     return true;
@@ -489,6 +492,7 @@ function setupAuthUI() {
         throw new Error(data.error || 'Login failed');
       }
       saveSession(data.token, data.username, data.totalKills || 0, data.skins || null);
+      syncEquippedSkins(data.equippedSkins); // server-authoritative equipped look
       if (Array.isArray(data.unlockedEmotes)) unlockedEmotes = data.unlockedEmotes;
       if (Array.isArray(data.equippedEmotes) && data.equippedEmotes.length === 10) equippedEmotes = data.equippedEmotes;
       hideAuth();
@@ -535,6 +539,7 @@ function setupAuthUI() {
         throw new Error(loginData.error || 'Auto-login failed');
       }
       saveSession(loginData.token, loginData.username, loginData.totalKills || 0);
+      syncEquippedSkins(loginData.equippedSkins); // server-authoritative equipped look
       if (Array.isArray(loginData.unlockedEmotes)) unlockedEmotes = loginData.unlockedEmotes;
       if (Array.isArray(loginData.equippedEmotes) && loginData.equippedEmotes.length === 10) equippedEmotes = loginData.equippedEmotes;
       hideAuth();
@@ -849,6 +854,7 @@ async function startGame() {
   weapon.setFPHandsGroup(fpHandsGroup);
   weapon.remotePlayers = remotePlayers;
   weapon.setMapMeshes(mapMeshes);
+  applyEquippedSkins();
 
   // ── Hook weapon events into the body-avatar animation system ─────────────
   weapon.onShoot  = () => { localAnimState.triggerShoot  = true; };
@@ -1154,7 +1160,9 @@ function setupCharacterPreviewAndSkins() {
     skins.forEach((skin) => {
       const isEquipped = skin.id === equipped;
       const isPlaceholder = skin.type === 'placeholder';
-      const isOwned = ownedSkins.includes(skin.id) || skin.exclusive; // Exclusive skins are automatically owned if accessible
+      // Ownership comes ONLY from the server's account data (ownedSkins), never
+      // from client-side "exclusive" flags — a devtools edit cannot grant it.
+      const isOwned = ownedSkins.includes(skin.id);
 
       const card = document.createElement('div');
       card.className = 'skin-card' + (isEquipped ? ' equipped' : '');
@@ -1256,55 +1264,92 @@ function setupCharacterPreviewAndSkins() {
   // ── Equip Button ─────────────────────────────────────────────────────────────
   const equipBtn = document.getElementById('skins-equip-btn');
   if (equipBtn) {
-    equipBtn.addEventListener('click', () => {
+    equipBtn.addEventListener('click', async () => {
       if (!skinsSelectedSkinId) return;
-      
-      // Check if user has access to this skin
+
+      // Client-side pre-check (UI only — the server makes the real decision).
       if (!hasSkinAccess(skinsSelectedSkinId, sessionUsername)) {
         alert('You do not have access to this exclusive skin.');
         return;
       }
-      
-      console.log(`Equipping skin: ${skinsSelectedSkinId} for weapon: ${skinsCurrentWeapon}`);
-      setEquippedSkin(skinsCurrentWeapon, skinsSelectedSkinId);
-      renderSkinsList(skinsCurrentWeapon);
-
-      // If game is running and this weapon is selected, re-apply visual
-      if (weapon && weapon.currentWeapon === skinsCurrentWeapon) {
-        weapon._updateVisualWeapon();
-        // Update weapon skin
-        if (fpHandsGroup) {
-          const weaponContainer = fpHandsGroup.children.find(c => c.name === 'weapon');
-          if (weaponContainer) {
-            console.log('Updating FP hands weapon skin');
-            updateWeaponSkin(weaponContainer, skinsCurrentWeapon, skinsSelectedSkinId);
-            weaponContainer.visible = true;
-          }
-        }
-        // Also update local body avatar weapon
-        if (localBodyAvatar && localBodyAvatar.root) {
-          console.log('Updating local body avatar weapon skin');
-          localBodyAvatar.root.traverse((obj) => {
-            if (obj.name === 'weapon' || obj.name === 'weapon-container') {
-              console.log('Found weapon container in local body, updating skin');
-              updateWeaponSkin(obj, skinsCurrentWeapon, skinsSelectedSkinId);
-              obj.visible = true;
-            }
-          });
-        }
+      if (!sessionToken) {
+        alert('You must be signed in to equip a skin.');
+        return;
       }
 
-      // Flash the equip button
-      equipBtn.textContent = '✔ EQUIPPED!';
-      equipBtn.style.background = 'linear-gradient(135deg, #22bb66 0%, #44dd88 100%)';
-      setTimeout(() => {
-        equipBtn.textContent = '✔ EQUIP SKIN';
-        equipBtn.style.background = '';
-      }, 1500);
+      try {
+        // SERVER-AUTHORITATIVE: the server validates ownership against the JWT
+        // account. Editing the username in devtools changes nothing here.
+        const data = await equipSkin(skinsCurrentWeapon, skinsSelectedSkinId, sessionToken);
+        if (data && data.equippedSkins) syncEquippedSkins(data.equippedSkins);
+
+        console.log(`Equipping skin: ${skinsSelectedSkinId} for weapon: ${skinsCurrentWeapon}`);
+        renderSkinsList(skinsCurrentWeapon);
+
+        // If game is running and this weapon is selected, re-apply visual
+        if (weapon && weapon.currentWeapon === skinsCurrentWeapon) {
+          weapon._updateVisualWeapon();
+          // Update weapon skin
+          if (fpHandsGroup) {
+            const weaponContainer = fpHandsGroup.children.find(c => c.name === 'weapon');
+            if (weaponContainer) {
+              console.log('Updating FP hands weapon skin');
+              updateWeaponSkin(weaponContainer, skinsCurrentWeapon, skinsSelectedSkinId);
+              weaponContainer.visible = true;
+            }
+          }
+          // Also update local body avatar weapon
+          if (localBodyAvatar && localBodyAvatar.root) {
+            console.log('Updating local body avatar weapon skin');
+            localBodyAvatar.root.traverse((obj) => {
+              if (obj.name === 'weapon' || obj.name === 'weapon-container') {
+                console.log('Found weapon container in local body, updating skin');
+                updateWeaponSkin(obj, skinsCurrentWeapon, skinsSelectedSkinId);
+                obj.visible = true;
+              }
+            });
+          }
+        }
+
+        // Flash the equip button
+        equipBtn.textContent = '✔ EQUIPPED!';
+        equipBtn.style.background = 'linear-gradient(135deg, #22bb66 0%, #44dd88 100%)';
+        setTimeout(() => {
+          equipBtn.textContent = '✔ EQUIP SKIN';
+          equipBtn.style.background = '';
+        }, 1500);
+      } catch (err) {
+        alert(err.message || 'Could not equip that skin.');
+      }
     });
   }
 
 } // end setupCharacterPreviewAndSkins
+
+// Apply the server-confirmed equipped skin to the local player's weapon
+// models (FP viewmodel + third-person body). The equipped skin id comes from
+// /api/me after login, which is server-authoritative.
+function applyEquippedSkins() {
+  if (!weapon) return;
+  const sniperSkin = getEquippedSkin('sniper');
+  if (sniperSkin && sniperSkin !== 'sniper_midnight') {
+    if (fpHandsGroup) {
+      const wc = fpHandsGroup.children.find(c => c.name === 'weapon');
+      if (wc) {
+        updateWeaponSkin(wc, 'sniper', sniperSkin);
+        wc.visible = true;
+      }
+    }
+    if (localBodyAvatar && localBodyAvatar.root) {
+      localBodyAvatar.root.traverse((obj) => {
+        if (obj.name === 'weapon' || obj.name === 'weapon-container') {
+          updateWeaponSkin(obj, 'sniper', sniperSkin);
+          obj.visible = true;
+        }
+      });
+    }
+  }
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  INPUT SETUP & MENU CONTROLS
@@ -1694,7 +1739,11 @@ function setupNetworkCallbacks() {
   };
 
   net.onAnticheatKick = (data) => {
-    const message = `Anti-cheat violation: ${data.reason}\nYou have been temporarily banned for ${data.duration} seconds.\nBan expires: ${new Date(data.expiry).toLocaleString()}`;
+    // strike: true = kicked without a ban, strike recorded on the account
+    // (e.g. teleporting or devtools tampering).
+    const message = data.strike
+      ? `${data.reason}\n\nYou have been kicked. This incident has been recorded on your account.`
+      : `Anti-cheat violation: ${data.reason}\nYou have been temporarily banned for ${data.duration} seconds.\nBan expires: ${new Date(data.expiry).toLocaleString()}`;
     alert(message);
     signOut();
   };
